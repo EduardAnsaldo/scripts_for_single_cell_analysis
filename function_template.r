@@ -1,43 +1,4 @@
 ## Initialization
-# rm(list = ls())
-# #Library the required
-
-# suppressMessages(library(Seurat))
-# suppressMessages(library(dplyr))
-# suppressMessages(library(cowplot))
-# suppressMessages(library(ggplot2))
-
-# suppressMessages(library(stringr))
-# suppressMessages(library(Stat2Data))
-# suppressMessages(library(tidyverse))
-# suppressMessages(library(patchwork))
-# # library(pheatmap))
-# suppressMessages(library(viridis)) 
-# suppressMessages(library(ggplot2))
-# suppressMessages(library(ggrepel))
-# suppressMessages(library(scRepertoire))
-# suppressMessages(library(circlize))
-# suppressMessages(library(scales))
-# suppressMessages(library(scCustomize))
-# suppressMessages(library(DESeq2)) 
-# suppressMessages(library(celldex))
-# suppressMessages(library(SingleR))
-# suppressMessages(library(gridExtra))
-
-# suppressMessages(library(DOSE))
-# suppressMessages(library(pathview))
-# suppressMessages(library(clusterProfiler))
-# suppressMessages(library(org.Mm.eg.db))
-# suppressMessages(library(enrichplot))
-# suppressMessages(library(msigdbr))
-# suppressMessages(library(pheatmap))
-# suppressMessages(library(UCell))
-# suppressMessages(library(VennDiagram))
-# suppressMessages(library(gprofiler2))
-
-# sessionInfo()
-
-
 ## Functions
 ### Overrepresentation analysis function GO and MSigDB -- ClusterProfiler
 GO_overrepresentation_analysis <- function (significant_genes, all_genes, local_path, ontology = 'ALL', minGSSize = 5, maxGSSize = 500, filename = '') {
@@ -760,7 +721,6 @@ pseudobulk <- function (scRNAseq, comparison, group1, group2, cluster='all_clust
 
     DESeq2::plotPCA(rld, ntop=500, intgroup='condition') #PCA
     ggsave(filename=paste0('Pseudobulk_PCA_', cluster, '.pdf'), path=figures_path) 
-
     PCA_table <- DESeq2::plotPCA(rld, ntop=500, intgroup='condition', returnData = T) #PCA table
     write.csv(PCA_table, file=paste(path, 'PCA_pseudobulk', cluster, group2, 'vs', group1, '.csv', sep='_'))
 
@@ -847,7 +807,7 @@ pseudobulk <- function (scRNAseq, comparison, group1, group2, cluster='all_clust
     limy <- results_scatter |> pull(paste0('Avg_', group2)) |> max()
     mylims <- max(limx, limy)*6
        
-    results_scatter |> 
+    plot <- results_scatter |> 
         ggplot(aes(x = !!sym(paste0('Avg_', group1)), y = !!sym(paste0('Avg_', group2)), col = diffexpressed))+
             geom_point(size=1.3
             ) +
@@ -895,7 +855,8 @@ pseudobulk <- function (scRNAseq, comparison, group1, group2, cluster='all_clust
        scale_x_log10(limits =  c(0.5, mylims))+
        scale_y_log10(limits =  c(0.5, mylims))
 
-    ggsave(paste0(figures_path, 'Pseudobulk scatter DEG in ', cluster, '.pdf'))
+    ggsave(plot = scatter_plot, paste0(figures_path, 'Pseudobulk scatter DEG in ', cluster, '.pdf'))
+    print(scatter_plot)
 
 
     #Filter values which are not significant but with high  FC that would bias the plot visualization
@@ -913,7 +874,7 @@ pseudobulk <- function (scRNAseq, comparison, group1, group2, cluster='all_clust
     print(paste('Removed', initial_number_of_genes-final_number_of_genes, 'non-significant genes that would bias the plot visualization'))
 
     # # Volcano Plot
-    results_volcano |> 
+    volcano_plot <- results_volcano |> 
         arrange(desc(padj)) |>
         ggplot(aes(x=log2FoldChange, y=log10_pval, label=genes_to_label_volcano, col=diffexpressed)) +
         geom_point(size=1.5) +
@@ -942,7 +903,8 @@ pseudobulk <- function (scRNAseq, comparison, group1, group2, cluster='all_clust
             )         +
             scale_y_continuous(n.breaks = 8) +
             scale_x_continuous(n.breaks = 8)
-    ggsave(paste0(figures_path, 'Pseudobulk volcano DEG in ', cluster, '.pdf'))
+    ggsave(plot = volcano_plot,paste0(figures_path, 'Pseudobulk volcano DEG in ', cluster, '.pdf'))
+    print(volcano_plot)
 
 ########## Overrepresentation analysis ##########
 
@@ -986,7 +948,7 @@ if (!is.null(pathways_of_interest)) {
         limy <- results_scatter |> pull(paste0('Avg_', group2)) |> max()
         mylims <- max(limx, limy)*6
         
-        results_scatter |> 
+        scatter_plot_2 <- results_scatter |> 
             ggplot(aes(x = !!sym(paste0('Avg_', group1)), y = !!sym(paste0('Avg_', group2)), col = diffexpressed))+
                 geom_point(size=1.3
                 ) +
@@ -1015,7 +977,9 @@ if (!is.null(pathways_of_interest)) {
         scale_x_log10(limits =  c(0.5, mylims))+
         scale_y_log10(limits =  c(0.5, mylims))
 
-        ggsave(paste0(figures_path, 'Pseudobulk scatter ',gene_list,' in ', cluster, ' ', group2, ' vs ', group1, '.pdf'))
+        ggsave(plot=scatter_plot_2, paste0(figures_path, 'Pseudobulk scatter ',gene_list,' in ', cluster, ' ', group2, ' vs ', group1, '.pdf'))
+        print(scatter_plot_2)
+
 
 
         #Filter values which are not significant but with high  FC that would bias the plot visualization
@@ -1033,7 +997,7 @@ if (!is.null(pathways_of_interest)) {
         print(paste('Removed', initial_number_of_genes-final_number_of_genes, 'non-significant genes that would bias the plot visualization'))
 
         # # Volcano Plot
-        results_volcano |> 
+        volcano_plot_2 <- results_volcano |> 
             #arrange(desc(padj)) |>
             ggplot(aes(x=log2FoldChange, y=log10_pval, label=genes_to_label_first, col=diffexpressed)) +
             geom_point(size=1.5) +
@@ -1065,7 +1029,8 @@ if (!is.null(pathways_of_interest)) {
                 )         +
                 scale_y_continuous(n.breaks = 8) +
                 scale_x_continuous(n.breaks = 8)
-        ggsave(paste0(figures_path, 'Pseudobulk volcano ',gene_list,' in ', cluster, ' ', group2, ' vs ', group1, '.pdf'))
+        ggsave(plot=volcano_plot_2, paste0(figures_path, 'Pseudobulk volcano ',gene_list,' in ', cluster, ' ', group2, ' vs ', group1, '.pdf'))
+        print(volcano_plot_2)
  
     }}
 
@@ -1139,7 +1104,7 @@ DEG_FindMarkers <- function (scRNAseq, comparison, group1, group2, cluster='all_
     names(my_colors) <- c("DOWN", "UP", "NO")
 
     # Scatterplot
-    DEG_scRNAseq |> 
+    scatter_plot <- DEG_scRNAseq |> 
         # arrange(desc(p_val_adj)) |>
         ggplot(aes(x = !!sym(paste0('Avg_', group1)), y = !!sym(paste0('Avg_', group2)), label = genes_to_label, col = diffexpressed))+
             geom_point(size=1.5
@@ -1168,7 +1133,8 @@ DEG_FindMarkers <- function (scRNAseq, comparison, group1, group2, cluster='all_
         scale_y_continuous(trans = 'log10')+
         scale_x_continuous(trans = 'log10')
 
-    ggsave(paste0(path, 'FindMarkers scatter DEG in ', cluster, '.pdf'))
+    ggsave(scatter_plot, paste0(path, 'FindMarkers scatter DEG in ', cluster, '.pdf'))
+    print(scatter_plot)
 
 
     #Filter values which are not significant but with high  FC that would bias the plot visualization
@@ -1181,7 +1147,7 @@ DEG_FindMarkers <- function (scRNAseq, comparison, group1, group2, cluster='all_
     print(paste('Removed', initial_number_of_genes-final_number_of_genes, 'non-significant genes that would bias the plot visualization'))
     
     #Volcano Plot
-    ggplot(DEG_scRNAseq, aes(x=avg_log2FC, y=log10_pval, label=genes_to_label, col=diffexpressed)) +
+    volcano_plot <- ggplot(DEG_scRNAseq, aes(x=avg_log2FC, y=log10_pval, label=genes_to_label, col=diffexpressed)) +
     geom_point(size=1.5) +
     geom_text_repel(
         size=5.3,
@@ -1204,7 +1170,8 @@ DEG_FindMarkers <- function (scRNAseq, comparison, group1, group2, cluster='all_
           axis.text= element_text(size=13),
           axis.title= element_text(size=15),
         )
-    ggsave(paste(path, 'FindMarkers Differential gene expression in', cluster, '.pdf'))
+    ggsave(volcano_plot, paste(path, 'FindMarkers Differential gene expression in', cluster, '.pdf'))
+    print(volcano_plot)
 
 
     
@@ -1241,7 +1208,7 @@ DEG_FindMarkers <- function (scRNAseq, comparison, group1, group2, cluster='all_
         limy <- DEG_scRNAseq |> pull(paste0('Avg_', group2)) |> max()
         mylims <- max(limx, limy)*6
         
-        DEG_scRNAseq |> 
+        scatter_plot_too <- DEG_scRNAseq |> 
              ggplot(aes(x = !!sym(paste0('Avg_', group1)), y = !!sym(paste0('Avg_', group2)), label = genes_to_label, col = diffexpressed))+
                 geom_point(size=1.3
                 ) +
@@ -1270,7 +1237,8 @@ DEG_FindMarkers <- function (scRNAseq, comparison, group1, group2, cluster='all_
         scale_x_log10(limits =  c(0.5, mylims))+
         scale_y_log10(limits =  c(0.5, mylims))
 
-        ggsave(paste0(path, 'Scatter ',gene_list,' in ', cluster, ' ', group2, ' vs ', group1, '.pdf'))
+        ggsave(scatter_plot_too, paste0(path, 'Scatter ',gene_list,' in ', cluster, ' ', group2, ' vs ', group1, '.pdf'))
+        print(scatter_plot_too)
 
 
         #Filter values which are not significant but with high  FC that would bias the plot visualization
@@ -1288,7 +1256,7 @@ DEG_FindMarkers <- function (scRNAseq, comparison, group1, group2, cluster='all_
         print(paste('Removed', initial_number_of_genes-final_number_of_genes, 'non-significant genes that would bias the plot visualization'))
 
         # # Volcano Plot
-        results_volcano |> 
+        volcano_plot_two <- results_volcano |> 
             #arrange(desc(p_val_adj)) |>
             ggplot(aes(x=avg_log2FC, y=log10_pval, label=genes_to_label, col=diffexpressed)) +
             geom_point(size=1.5) +
@@ -1320,7 +1288,8 @@ DEG_FindMarkers <- function (scRNAseq, comparison, group1, group2, cluster='all_
                 )         +
                 scale_y_continuous(n.breaks = 8) +
                 scale_x_continuous(n.breaks = 8)
-        ggsave(paste0(path, 'Volcano ',gene_list,' in ', cluster, ' ', group2, ' vs ', group1, '.pdf'))
+        ggsave(volcano_plot_two, paste0(path, 'Volcano ',gene_list,' in ', cluster, ' ', group2, ' vs ', group1, '.pdf'))
+        print(volcano_plot_two)
  
     }}
                            
@@ -1465,7 +1434,7 @@ bulk_analysis <- function (counts_table, comparison = 'Groups', group1, group2, 
     limy <- results_scatter |> pull(paste0('Avg_', group2)) |> max()
     mylims <- max(limx, limy)*6
        
-    results_scatter |> 
+    scatterplot <- results_scatter |> 
         ggplot(aes(x = !!sym(paste0('Avg_', group1)), y = !!sym(paste0('Avg_', group2)), col = diffexpressed))+
             geom_point(size=1.3
             ) +
@@ -1513,7 +1482,8 @@ bulk_analysis <- function (counts_table, comparison = 'Groups', group1, group2, 
        scale_x_log10(limits =  c(0.5, mylims))+
        scale_y_log10(limits =  c(0.5, mylims))
 
-    ggsave(paste0(figures_path, 'Pseudobulk scatter DEG in ', cell_type, '.pdf'))
+    ggsave(scatterplot, paste0(figures_path, 'Scatter DEG in ', cell_type, '.pdf'))
+    print(scatterplot)
 
 
     #Filter values which are not significant but with high  FC that would bias the plot visualization
@@ -1531,7 +1501,7 @@ bulk_analysis <- function (counts_table, comparison = 'Groups', group1, group2, 
     print(paste('Removed', initial_number_of_genes-final_number_of_genes, 'non-significant genes that would bias the plot visualization'))
 
     # # Volcano Plot
-    results_volcano |> 
+    volcano_plot <- results_volcano |> 
         arrange(desc(padj)) |>
         ggplot(aes(x=log2FoldChange, y=log10_pval, label=genes_to_label_volcano, col=diffexpressed)) +
         geom_point(size=1.5) +
@@ -1560,7 +1530,8 @@ bulk_analysis <- function (counts_table, comparison = 'Groups', group1, group2, 
             )         +
             scale_y_continuous(n.breaks = 8) +
             scale_x_continuous(n.breaks = 8)
-    ggsave(paste0(figures_path, 'Pseudobulk volcano DEG in ', cell_type, '.pdf'))
+    ggsave(volcano_plot, paste0(figures_path, 'Volcano DEG in ', cell_type, '.pdf'))
+    print(volcano_plot)
 
 ########## Overrepresentation analysis ##########
 
@@ -1604,7 +1575,7 @@ if (!is.null(pathways_of_interest)) {
         limy <- results_scatter |> pull(paste0('Avg_', group2)) |> max()
         mylims <- max(limx, limy)*6
         
-        results_scatter |> 
+        scatter_plot_two <- results_scatter |> 
             ggplot(aes(x = !!sym(paste0('Avg_', group1)), y = !!sym(paste0('Avg_', group2)), col = diffexpressed))+
                 geom_point(size=1.3
                 ) +
@@ -1633,7 +1604,8 @@ if (!is.null(pathways_of_interest)) {
         scale_x_log10(limits =  c(0.5, mylims))+
         scale_y_log10(limits =  c(0.5, mylims))
 
-        ggsave(paste0(figures_path, 'Pseudobulk scatter ',gene_list,' in ', cell_type, ' ', group2, ' vs ', group1, '.pdf'))
+        ggsave(scatter_plot_two, paste0(figures_path, 'Pseudobulk scatter ',gene_list,' in ', cell_type, ' ', group2, ' vs ', group1, '.pdf'))
+        print(scatter_plot_two)
 
 
         #Filter values which are not significant but with high  FC that would bias the plot visualization
@@ -1651,7 +1623,7 @@ if (!is.null(pathways_of_interest)) {
         print(paste('Removed', initial_number_of_genes-final_number_of_genes, 'non-significant genes that would bias the plot visualization'))
 
         # # Volcano Plot
-        results_volcano |> 
+        volcano_plot_two <- results_volcano |> 
             #arrange(desc(padj)) |>
             ggplot(aes(x=log2FoldChange, y=log10_pval, label=genes_to_label_first, col=diffexpressed)) +
             geom_point(size=1.5) +
@@ -1683,7 +1655,8 @@ if (!is.null(pathways_of_interest)) {
                 )         +
                 scale_y_continuous(n.breaks = 8) +
                 scale_x_continuous(n.breaks = 8)
-        ggsave(paste0(figures_path, 'Pseudobulk volcano ',gene_list,' in ', cell_type, ' ', group2, ' vs ', group1, '.pdf'))
+        ggsave(volcano_plot_two, paste0(figures_path, 'Pseudobulk volcano ',gene_list,' in ', cell_type, ' ', group2, ' vs ', group1, '.pdf'))
+        print(volcano_plot_two)
  
     }}
 
