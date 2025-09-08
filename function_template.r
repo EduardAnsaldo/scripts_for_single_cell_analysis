@@ -437,7 +437,7 @@ pseudobulk <- function (scRNAseq, comparison, group1, group2, cluster='all_clust
 
     ########## Overrepresentation analysis ##########
     if (run_gProfiler2) {
-        gProfiler2_functional_analysis(results,  cluster = cluster, comparison = comparison, path= path , FC_threshold = FC_threshold)
+        gProfiler2_functional_analysis(results,  cluster = cluster, , group1 = group1, group2 = group2, path= path , FC_threshold = FC_threshold)
         if (!is.null(pathways_of_interest)) {
             pathways_of_interest_analysis(results = results, pathways_of_interest = pathways_of_interest,  cluster = cluster, path = path, group1 = group1, group2 = group2, comparison = comparison)
         }
@@ -544,7 +544,7 @@ DEG_FindMarkers_RNA_assay <- function (scRNAseq, comparison, group1, group2, clu
 
     ########## Overrepresentation analysis ##########
     if (run_gProfiler2) {
-        gProfiler2_functional_analysis(results,  cluster = cluster, comparison = comparison, path= path , FC_threshold = FC_threshold)
+        gProfiler2_functional_analysis(results,  cluster = cluster, , group1 = group1, group2 = group2, path= path , FC_threshold = FC_threshold)
         if (!is.null(pathways_of_interest)) {
             pathways_of_interest_analysis(results = results, pathways_of_interest = pathways_of_interest,  cluster = cluster, path = path, group1 = group1, group2 = group2, comparison = comparison)
         }
@@ -630,8 +630,8 @@ DEG_FindMarkers_SCT_assay <- function (scRNAseq, comparison, group1, group2, is_
                         by = c('genes' = 'gene_name')) |>
                     left_join(y = counts_CPM, by = c('genes' = 'gene'))
     results_filtered <- filter(results, padj < p_value_threshold) %>% arrange(padj)
-    results_filtered_UP <- filter(results_filtered, log2FoldChange >  FC_threshold) 
-    results_filtered_DOWN <- filter(results_filtered, log2FoldChange <  FC_threshold)
+    results_filtered_UP <- filter(results_filtered, log2FoldChange > FC_threshold) 
+    results_filtered_DOWN <- filter(results_filtered, log2FoldChange < FC_threshold)
 
     # Write results to CSV files
     write.csv(results_filtered |> arrange(padj), file=here(gene_lists_path, paste('ALL_GENES_DEG_Analysis', cluster, 'Wilcox', group2, 'vs', group1, '.csv', sep='_')))
@@ -649,7 +649,7 @@ DEG_FindMarkers_SCT_assay <- function (scRNAseq, comparison, group1, group2, is_
 
     ########## Overrepresentation analysis ##########
     if (run_gProfiler2) {
-        gProfiler2_functional_analysis(results,  cluster = cluster, comparison = comparison, path= path , FC_threshold = FC_threshold)
+        gProfiler2_functional_analysis(results,  cluster = cluster, group1 = group1, group2 = group2, path= path , FC_threshold = FC_threshold)
         if (!is.null(pathways_of_interest)) {
             pathways_of_interest_analysis(results = results, pathways_of_interest = pathways_of_interest,  cluster = cluster, path = path, group1 = group1, group2 = group2, comparison = comparison)
         }
@@ -783,7 +783,7 @@ bulk_analysis <- function (counts_table, comparison = 'Groups', group1, group2, 
 
     ########## Overrepresentation analysis ##########
     if (run_gProfiler2) {
-        gProfiler2_functional_analysis(results,  cluster = cluster, comparison = comparison, path= path , FC_threshold = FC_threshold)
+        gProfiler2_functional_analysis(results,  cluster = cluster, , group1 = group1, group2 = group2, path= path , FC_threshold = FC_threshold)
         if (!is.null(pathways_of_interest)) {
             pathways_of_interest_analysis(results = results, pathways_of_interest = pathways_of_interest,  cluster = cluster, path = path, group1 = group1, group2 = group2, comparison = comparison)
         }

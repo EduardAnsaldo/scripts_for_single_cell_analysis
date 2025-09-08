@@ -20,6 +20,7 @@ gProfiler: false
 format:
   html:
     embed-resources: true
+    fig-cap-location: top
     toc: true
     toc-depth: 3
     toc-expand: 1
@@ -54,7 +55,6 @@ library(pheatmap)
 library(viridis)
 library(here)
 library(readxl)
-library(rlang)
 library(scDblFinder)
 
 # Single Cell Analysis Packages
@@ -77,10 +77,11 @@ library(org.Mm.eg.db)
 library(scRepertoire)
 library(enrichplot)
 library(msigdbr)
+library(rlang)
 ```
 
 ```{r}
- #| results: hide 
+#| results: hide 
 # Setting working directory and seed
 set.seed(3514)
 i_am('scripts/Analysis_E2_day5.qmd')
@@ -1028,8 +1029,8 @@ gProfiler2 <- TRUE
 ### DEG analysis - Cross-fostered vs Control - fine cell type annotations
 
 ```{r}
-#| fig-width: 7.5
-#| fig-height: 7.5
+#| fig-width: 7
+#| fig-height: 7
 #| layout-ncol: 2
 #| results: hide
 
@@ -1059,13 +1060,13 @@ DEG_counts
 ```
 
 ### DEG analysis - Cross-fostered vs Control - fine cell type annotations
+
 ```{r}
-#| fig-width: 7.5
-#| fig-height: 7.5
+#| fig-width: 7
+#| fig-height: 7
 #| layout-ncol: 2
 #| results: hide
-colnames(seurat@meta.data)
-unique(seurat$Samples)
+
 path <- paste0(results_path, 'DEG_Wilcox_analysis_IECs_Cross-fostered_vs_Control_major_cell_types/')
 unlink(path,recursive = T)
 dir.create(path)
