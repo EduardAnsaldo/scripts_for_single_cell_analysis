@@ -1,0 +1,776 @@
+---
+title: Analysis of Intestinal Cross-Fostering time course - CD45+
+author: Eduard Ansaldo
+date: '`r Sys.Date()`'
+verbose: false
+engine: knitr
+knitr:
+  opts_chunk: 
+    echo: false
+    warning: false
+    message: false
+    error: false
+    cache: false
+    results: markdown
+    code-fold: true
+    
+processing: true
+gProfiler: false
+
+format:
+  html:
+    embed-resources: true
+    toc: true
+    toc-depth: 3
+    toc-expand: 1
+    toc-location: left
+    toc-title: Table of Contents
+    toc-collapse: true
+    page-layout: full
+    fig-width: 7
+    fig-height: 7
+    fig-align: 'center'
+---
+
+# Initial Notes
+
+- Sequencing data was processed with cellranger by the core and given to us as seurat objects. 
+- The number of recovered cells is much lower than the numbers of cells provided by Danish (I'm assuming his numbers are cells sorted), with a capture yield of only ~10% for the small intestine and ~20% for the large intestine. This is an area of potential improvement, whether that was at the level of sorting or the post-sort processing.
+- Hashtag staining and demultiplexing was excellent, with extremely clear separation between the hashtags.
+- Interesting observation: memory B cell cluster specific to the cross foster condition, please see results below.
+
+::: {.content-visible when-meta="verbose"}
+# Initialization
+:::
+
+```{r}
+# General R and plotting 
+library(tidyverse)
+library(ggplot2)
+library(scales)
+library(patchwork)
+library(cowplot)
+library(gridExtra)
+library(ggrepel)
+library(stringr)
+library(VennDiagram)
+library(pheatmap)
+library(viridis)
+library(here)
+
+# Single Cell Analysis Packages
+library(Seurat)
+library(scRepertoire)
+library(circlize)
+library(scCustomize)
+library(SingleR)
+library(celldex)
+library(UCell)
+
+# DEG, pathway enrichment and visualization packages
+library(DESeq2)
+library(gprofiler2)
+library(clusterProfiler)
+library(DOSE)
+library(pathview)
+library(org.Mm.eg.db)
+library(scRepertoire)
+library(enrichplot)
+library(msigdbr)
+```
+
+```{r}
+#| results: hide 
+# Setting working directory and seed
+set.seed(3514)
+i_am('Analysis_E1_SI.qmd')
+here()
+results_path <- here('results/')
+dir.create(results_path)
+results_path <- here('results/E1_SI/')
+dir.create(results_path)
+figures_path <- here('results/E1_SI/figures/')
+dir.create(figures_path)
+data_path <- here('data/')
+dir.create(data_path)
+tables_path <- here('results/E1_SI/tables/')
+dir.create(tables_path)
+
+# Loading custom functions
+source(here('scripts/function_template.r'))
+source(here('scripts/gProfiler2_functions.r'))
+
+# Setting up color palettes
+diverging_palette <- hcl.colors(n = 20,'Purple-Green',rev = T)
+sequential_palette_dotplot <- hcl.colors(n = 20,'YlGn',rev = T)
+sequential_palette <- hcl.colors(n = 20,'Mako',rev = T)
+```
+
+:::{.content-visible when-meta='processing'}
+# Preprocessing
+:::
+
+:::{.content-visible when-meta='verbose'}
+## Read in data
+:::
+
+```{r}
+#| results: hide
+#Load the dataset from the cellranger outs
+scdata <- Read10X(data.dir = here("data/Processed_data/RC_all/RC1_outs/filtered_feature_bc_matrix"))
+
+#Initialize the seurat object with the raw (non-normalized data)
+seurat <- CreateSeuratObject(counts=scdata$'Gene Expression', min.cells = 3)
+
+# #Add HTO data as a new assay independent from RNA
+HTO <- CreateAssayObject(counts = scdata$'Antibody Capture')
+seurat[["HTO"]] <- HTO
+```
+
+:::{.content-visible when-meta='processing'}
+## QC
+:::
+
+```{r}
+#| layout-ncol: 2
+#Quantifying percentage mitochondria
+Idents(seurat) <- 'Tissue'
+seurat[["percent.mt"]] <- PercentageFeatureSet(seurat, assay="RNA",pattern = "mt-")
+
+VlnPlot(seurat, features = c("nCount_RNA", "nFeature_RNA", "percent.mt"), ncol=3, pt.size = 0.01)
+
+# Setting thresholds:
+nCount_RNA_threshold <- 700
+nFeature_RNA_threshold <- 250
+percent_mt_threshold <- 9
+
+
+p1 <- seurat@meta.data %>% 
+  	ggplot(aes(x=nCount_RNA)) + 
+  	geom_density() + 
+  	scale_x_log10() + 
+  	theme_classic() +
+  	ylab("Cell density") +
+  	geom_vline(xintercept = nCount_RNA_threshold)
+
+p2 <- seurat@meta.data %>% 
+  	ggplot(aes(x=nFeature_RNA)) + 
+  	geom_density() + 
+  	scale_x_log10() + 
+  	theme_classic() +
+  	ylab("Cell density") +
+  	geom_vline(xintercept = nFeature_RNA_threshold)
+
+p3 <- seurat@meta.data %>% 
+  	ggplot(aes(x=percent.mt)) + 
+  	geom_density() + 
+  	scale_x_log10() + 
+  	theme_classic() +
+  	ylab("Cell density") +
+  	geom_vline(xintercept = percent_mt_threshold)
+
+grid.arrange(p1, p2, p3)    
+
+# # Visualize feature relationships
+# # plot1 <- FeatureScatter(seurat, feature1 = "nCount_RNA", feature2 = "percent.mt")
+
+# # plot2 <- FeatureScatter(seurat, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+# # plot1+plot2
+
+cell_number <- list(nrow(seurat[[]]))
+```
+
+Filtering Low Quality Cells
+
+```{r}
+# Filter data
+
+cell_number <- list(nrow(seurat[[]]))
+seurat <- subset(seurat, subset = nFeature_RNA  > nFeature_RNA_threshold & percent.mt < percent_mt_threshold & nCount_RNA > nCount_RNA_threshold)
+cell_number <- append(cell_number, nrow(seurat[[]]))
+
+print("Cell number before and after filterings")
+print(cell_number)
+```
+
+```{r}
+#| results: hide
+str(seurat@assays, max.level = 1)
+seurat[["HTO"]] <- seurat[["CSP"]]
+```
+
+:::{.content-visible when-meta='verbose'}
+## Data Normalization
+:::
+
+```{r}
+# Normalize RNA data with SCTransform
+seurat <- SCTransform(seurat, verbose = T)
+
+# Normalize HTO data with CLR
+seurat <- NormalizeData(seurat, assay = "HTO",normalization.method = "CLR")
+
+# Normalize biotin data with CLR
+
+DefaultAssay(seurat)
+```
+
+:::{.content-visible when-meta='processing'}
+## Hashtag Demultiplexing
+:::
+
+```{r}
+plot1 <- seurat@meta.data %>% 
+  	ggplot(aes(x=nCount_HTO)) + 
+  	geom_density() + 
+  	scale_x_log10() + 
+  	theme_classic() +
+  	ylab("Cell density") 
+
+plot2 <- seurat@meta.data %>% 
+  	ggplot(aes(x=nFeature_HTO)) + 
+  	geom_density() + 
+  	scale_x_log10() + 
+  	theme_classic() +
+  	ylab("Cell density") 
+
+plot1+plot2
+```
+
+```{r}
+seurat <- HTODemux(seurat, assay = "HTO", positive.quantile = 0.99)
+
+table(seurat$hash.ID)
+table(seurat$HTO_maxID)
+table(seurat$HTO_classification.global)
+
+#tSNE-visualization
+seurat_subset <- subset(seurat, idents = "Negative", invert =TRUE)
+DefaultAssay(seurat_subset) <- "HTO"
+seurat_subset <- ScaleData(seurat_subset, assay = "HTO",  features = rownames(seurat_subset), verbose = FALSE )
+seurat_subset <- RunPCA(seurat_subset, assay = "HTO", rownames(seurat_subset), approx = FALSE)
+seurat_subset <- RunTSNE(seurat_subset, assay = "HTO", dims = 1:24,  perplexity = 100, check_duplicates=FALSE)
+DimPlot(seurat_subset)
+```
+
+Hashtag staining and demultiplexing was very successful, with extremely clear separation between the hashtags.
+
+```{r}
+print("Number of Singlets")
+print(nrow(seurat@meta.data |> filter( HTO_classification.global  == 'Singlet')))
+
+print("Number of Doublets")
+print(nrow(seurat@meta.data |> filter( HTO_classification.global  == 'Doublet')))
+
+# Filtering singlets only
+Idents(seurat) <- "HTO_classification.global"
+seurat <-subset(seurat, idents = "Singlet")
+```
+
+:::{.content-visible when-meta='verbose'}
+## Create Groups
+:::
+
+```{r}
+#| results: hide
+seurat@meta.data <- seurat@meta.data |>
+    mutate(
+        Samples = case_when(
+            str_detect(hash.ID, 'C0301-Hashtag1') ~ 'Day 5 CT',
+            str_detect(hash.ID, 'C0302-Hashtag2') ~ 'Day 5 CF',
+            str_detect(hash.ID, 'C0303-Hashtag3') ~ 'Day 14 CT IEL',
+            str_detect(hash.ID, 'C0304-Hashtag4') ~ 'Day 14 CF IEL',
+            str_detect(hash.ID, 'C0305-Hashtag5') ~ 'Day 42 CT IEL',
+            str_detect(hash.ID, 'C0306-Hashtag6') ~ 'Day 42 CF IEL',
+            str_detect(hash.ID, 'C0307-Hashtag7') ~ 'Day 14 CT LPL',
+            str_detect(hash.ID, 'C0308-Hashtag8') ~ 'Day 14 CF LPL',
+            str_detect(hash.ID, 'C0309-Hashtag9') ~ 'Day 42 CT LPL',
+            str_detect(hash.ID, 'C0310-Hashtag10') ~ 'Day 42 CF LPL',
+            TRUE ~ 'Other'
+
+    ),
+        cell_population = case_when(
+            str_detect(hash.ID, 'C0301-Hashtag1') ~ 'Both',
+            str_detect(hash.ID, 'C0302-Hashtag2') ~ 'Both',
+            str_detect(hash.ID, 'C0303-Hashtag3') ~ 'IEL',
+            str_detect(hash.ID, 'C0304-Hashtag4') ~ 'IEL',
+            str_detect(hash.ID, 'C0305-Hashtag5') ~ 'IEL',
+            str_detect(hash.ID, 'C0306-Hashtag6') ~ 'IEL',
+            str_detect(hash.ID, 'C0307-Hashtag7') ~ 'LPL',
+            str_detect(hash.ID, 'C0308-Hashtag8') ~ 'LPL',
+            str_detect(hash.ID, 'C0309-Hashtag9') ~ 'LPL',
+            str_detect(hash.ID, 'C0310-Hashtag10') ~ 'LPL',
+            TRUE ~ 'Other'),
+        Groups = case_when(
+            str_detect(Samples, 'CT') ~ 'Control',
+            str_detect(Samples, 'CF') ~ 'Cross-fostered',
+            TRUE ~ 'Other'
+        ),
+        Timepoint = case_when(
+            str_detect(hash.ID, '5') ~ 'Day 5',
+            str_detect(hash.ID, '14') ~ 'Day 14',
+            str_detect(hash.ID, '42') ~ 'Day 42'
+        ),
+        )
+
+
+seurat@meta.data <- seurat@meta.data |>
+    mutate(Groups = factor(Groups,levels = c('Control', 'Cross-fostered'))) |>
+    mutate(Samples = factor(Samples, levels = c('Day 5 CT',
+                                                'Day 5 CF',
+                                                'Day 14 CT IEL',
+                                                'Day 14 CF IEL',
+                                                'Day 42 CT IEL',
+                                                'Day 42 CF IEL',
+                                                'Day 14 CT LPL',
+                                                'Day 14 CF LPL',
+                                                'Day 42 CT LPL',
+                                                'Day 42 CF LPL'
+                                                )),
+            cell_population = factor(cell_population, levels = c('IEL', 'LPL', 'Both')),
+            Timepoint = factor(Timepoint, levels = c('Day 5', 'Day 14', 'Day 42'))
+        )
+```
+
+:::{.content-visible when-meta='processing'}
+## Clustering
+:::
+
+```{r}
+#| fig-cap: 'Elbow plot showing the percentage of variability represented by by each PC to select number of dimensions '
+
+#Dimensionality reduction
+seurat <- RunPCA(seurat,npcs = 200
+)
+
+#Determining dimensionality of the dataset
+ElbowPlot(seurat, ndims = 200)
+```
+
+:::{.content-visible when-meta='processing'}
+Chosen Number of Dimensions:
+:::
+
+```{r}
+# Describe number of dimensions
+
+dimensions  <- 55 
+dimensions
+```
+
+```{r}
+#| results: hide
+seurat <- RunUMAP(seurat, dims=1:dimensions, verbose = F, seed.use = 3514L)
+resolutions <- c(0.25, 0.375, 0.5, 0.625, 0.75, 1, 1.25, 1.5, 1.75)
+seurat <- FindNeighbors(seurat, dims = 1:dimensions, verbose = F)
+seurat <- FindClusters(seurat, resolution = resolutions, verbose = F)
+```
+
+```{r}
+#| fig-cap: UMAP plots showing the clustering results at different resolutions
+#| fig-width: 10
+#| fig-height: 10
+
+p <- list()
+i <- 1
+for (resolution in resolutions ) {
+    Idents(seurat) <- paste0('SCT_snn_res.', resolution) 
+    p2 <- DimPlot(seurat, reduction = "umap", label = TRUE) + ggtitle(paste0('R ', resolution)) + theme(legend.position = "none")    
+    p[[i]] <- p2
+    i <- i+1
+}
+
+plot <- grid.arrange(grobs = p)
+# ggsave('initial_clustering_results_by_resolution.pdf', path = here('result/figures'), plot = plot)
+```
+
+:::{.content-visible when-meta='processing'}
+Chosen resolution
+:::
+
+```{r}
+resolution <- 1
+resolution
+```
+
+:::{.content-visible when-meta='verbose'}
+### Save Object
+:::
+
+```{r}
+saveRDS(seurat, file = here('data/SI_object.rds'))
+```
+
+# Analysis
+
+```{r}
+seurat <- readRDS(here('data/SI_object.rds'))
+object_annotations <- 'SI'
+```
+
+### Clustering Results
+
+```{r}
+#| layout-ncol: 2
+Idents(seurat) <- paste0('SCT_snn_res.', resolution)
+seurat[['seurat_clusters']]<- Idents(seurat)
+DimPlot(seurat, reduction = "umap", label = TRUE) + ggtitle(paste0('R ', resolution)) + theme(legend.position = "none")
+ggsave(paste0('UMAP_clusters_R_', resolution, '_', object_annotations, '.pdf'), path = figures_path)
+DimPlot(seurat, reduction = "umap", label = TRUE, split.by = 'Groups', ncol = 2) + ggtitle(paste0('R ', resolution)) + theme(legend.position = "none")
+ggsave(paste0('UMAP_clusters_by_group_R_', resolution, '_', object_annotations, '.pdf'), path = figures_path, width = 5, height = 5)
+DimPlot(seurat, reduction = "umap", label = TRUE, split.by = 'Samples', ncol = 4) + ggtitle(paste0('R ', resolution)) + theme(legend.position = "none")
+ggsave(paste0('UMAP_clusters_by_sample_R_', resolution, '_', object_annotations, '.pdf'), path = figures_path)
+```
+
+### Cluster Proportions
+
+```{r}
+#| layout-ncol: 2
+# Extracting cell counts for bar graphs
+cell_counts <- FetchData(seurat,vars=c('seurat_clusters', "Samples")) 
+cell_counts <- arrange(cell_counts, Samples)
+
+
+counts <- cell_counts %>% add_count(Samples, name='total_cell_count_by_sample') #%>%  ungroup() %>% arrange( seurat_clusters , desc(hash.ID) ) #%>% arrange('seurat_clusters')
+
+counts <- counts %>% 
+    dplyr::count(seurat_clusters, Samples, total_cell_count_by_sample,name='cluster_count')  |> 
+        mutate(frequency_within_sample=cluster_count*100/total_cell_count_by_sample)  |> 
+        mutate(Samples = as.character(Samples)) |> 
+
+        arrange( Samples, desc(Samples)) #%>% arrange('seurat_clusters')
+
+new_counts <- counts |> 
+    arrange(Samples) |>     
+    pivot_wider(id_cols = seurat_clusters, names_from = 'Samples', values_from = frequency_within_sample)
+
+write.csv(new_counts,file=paste0(tables_path,"number of cells per cluster per condition_", object_annotations, ".csv"),row.names=F)
+
+colors <- c('deeppink', 'deeppink3', 'hotpink', 'hotpink4', 'cadetblue', 'cadetblue2', 'deepskyblue', 'deepskyblue4')
+# Barplot of proportion of cells in each cluster by sample
+ggplot(seurat@meta.data) +
+    geom_bar(aes(x=Groups, fill=seurat_clusters), position=position_fill()) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+     
+ggsave(paste0(figures_path, 'cells_per_cluster_per_group_', object_annotations, '.pdf'))
+
+# Barplot of proportion of cells in each cluster by sample
+ggplot(seurat@meta.data) +
+    geom_bar(aes(x=Samples, fill=seurat_clusters), position=position_fill())+ theme(axis.text.x = element_text(angle = 45, vjust = 1))
+ggsave(paste0(figures_path, 'cells_per_cluster_per_sample_', object_annotations, '.pdf'))
+    
+```
+
+
+### Top DEGs per cluster
+
+```{r}
+#| fig-width: 10
+#| fig-height: 16
+plot1 <- top_genes_per_cluster(seurat, object_annotations, tables_path = tables_path, figures_path = figures_path, results_path = results_path, run_pathway_enrichment = F) 
+ggsave(paste0(figures_path, 'DotPlot_Top3_per_cluster', object_annotations, '.pdf'), width = 10, height = 16)
+```
+
+:::{.content-visible when-meta='processing'}
+### Automatic cell type annotations
+:::
+
+```{r}
+local_path <- paste0(figures_path, object_annotations,'_cell_type_annotations')
+unlink(local_path,recursive = T)
+dir.create(local_path)
+
+# Normalize and scale data
+    seurat <- NormalizeData(seurat, assay = "RNA", normalization.method = "LogNormalize", scale.factor = 10000)
+    seurat <- ScaleData(seurat, assay = 'RNA')
+```
+
+:::{.content-visible when-meta='processing'}
+#### SingleR annotations
+:::
+
+:::{.content-visible when-meta='processing'}
+Annotations per Cluster
+:::
+
+```{r}
+#| fig-cap: UMAP plot showing the clustering results with SingleR fine annotations on a per cluster basis
+#| fig-width: 9
+#| fig-height: 6
+seurat <- annotate_seurat_with_SingleR_Eduard(seurat, local_path, database = 'ImmGen', annotation_basis = 'cluster_fine', split_by_groups = FALSE)
+```
+
+:::{.content-visible when-meta='processing'}
+Annotations per Cell
+:::
+
+```{r}
+#| fig-cap: UMAP plot showing the clustering results with SingleR coarse annotations on a per cell basis
+seurat <- annotate_seurat_with_SingleR_Eduard(seurat, local_path, database = 'ImmGen', annotation_basis = 'cell_coarse', split_by_groups = FALSE)
+```
+
+```{r}
+#| include: false
+seurat <- annotate_seurat_with_SingleR_Eduard(seurat, local_path, database = 'ImmGen', annotation_basis = 'cell_fine', split_by_groups = FALSE)
+```
+
+### Plotting Genes of Interest for cluster annotation
+
+```{r}
+#| fig-cap: Feature plots showing the expression of T cell markers
+#| fig-width: 8
+#| fig-height: 10
+ 
+FeaturePlot_scCustom(seurat, features = c('Cd3e', 'Cd4', 'Cd8a', 'Cd8b1', 'Trdc', 'Trac'), pt.size = 0.01, colors_use = sequential_palette) +
+    theme(legend.position = 'none')
+
+# FeaturePlot_scCustom(seurat, features = c('Trdc', 'Trac'), colors_use = sequential_palette) 
+```
+
+```{r}
+#| fig-cap: Feature plots showing the expression of T cell markers
+#| fig-width: 8
+#| fig-height: 10
+FeaturePlot_scCustom(seurat, features = c('Tbx21', 'Rorc', 'Bcl6', 'Pdcd1', 'Foxp3', 'Gata3'), pt.size = 0.1, colors_use = sequential_palette) +
+    theme(legend.position = 'none')
+```
+
+```{r}
+#| fig-cap: Feature plots showing the expression of T cell markers
+#| fig-width: 8
+#| fig-height: 10
+FeaturePlot_scCustom(seurat, features = c('Sirpa', 'Xcr1', 'Itgae', 'Itgax', 'Klrc1', 'Lef1'), pt.size = 0.1, colors_use = sequential_palette) +
+    theme(legend.position = 'none')
+```
+```{r}
+#| fig-cap: Feature plots showing the expression of B cell markers
+#| #| fig-width: 8
+#| fig-height: 13
+FeaturePlot_scCustom(seurat, features = c('Ighm', 'Ighd', 'Ighg1', 'Igha', 'Igkc', 'Ighg2c', 'Ighg3'), pt.size = 0.1, colors_use = sequential_palette, num_columns = 2) 
+```
+
+```{r}
+#| fig-cap: Feature plots showing the expression of B cell markers
+#| #| fig-width: 8
+#| fig-height: 16
+FeaturePlot_scCustom(seurat, features = c('Pax5', 'Lgals7', 'Bcl6', 'Ighd', 'Ighg1', 'Igha', 'Igkc', 'Ighg2c', 'Prdm1'), pt.size = 0.1, colors_use = sequential_palette, num_columns = 2) 
+```
+
+```{r}
+#| fig-cap: Feature plots showing the expression of B cell markers
+#| #| fig-width: 8
+#| fig-height: 10
+FeaturePlot_scCustom(seurat, features = c('Igkv10-96', 'Igkv1-117', 'Igkv1-135', 'Igkv1-110', 'Igkv14-111', 'Iglv1'), pt.size = 0.1, colors_use = sequential_palette) +
+    theme(legend.position = 'none')
+```
+
+Now the B cells are not clustered based on the V gene segment usage
+
+### Looking at cluster 14
+
+```{r}
+#| fig-cap: Feature plots showing the expression of Macrophage, Neutrophil, and Endothelial markers
+#| #| fig-width: 11
+#| fig-height: 11
+Idents(seurat) <- 'seurat_clusters'
+gene_list_plot <- c('Pax5','Cd72', 'Cd19', 'Ms4a1', 'Ighm', 'Igha', 'Ighd', 'Ighg1', 'Ighg2b', 'Ighg2c', 'Fcrl5', 'Ccr6', 'Bhlhe41', 'Sh2d1b1', 'Zbtb32', 'Prdm1', 'Cd27', 'Fcer2a', 'Cr2')
+gene_list_plot <- gene_list_plot |> unique()
+
+DotPlot_scCustom(seurat,
+                features = gene_list_plot,
+                colors_use=sequential_palette_dotplot,
+                flip_axes = F,
+                dot.scale = 10,
+                dot.min = 0,
+                scale.min = 0,
+                scale.max = 70,
+                x_lab_rotate = T,
+                y_lab_rotate = F) +
+    theme(axis.text.x = element_text(size = 14),
+         axis.text.y = element_text(size = 14),
+         legend.title = element_text(size = 18))
+ggsave(paste0(figures_path, 'DotPlot_B_memory_per_cluster.pdf'), width = 10, height = 20)
+```
+
+```{r}
+#| fig-cap: Feature plots showing the expression of ISGs
+#| #| fig-width: 11
+#| fig-height: 8
+Idents(seurat) <- 'seurat_clusters'
+gene_list_plot <- c('Stat1', 'Irf7', 'Isg15', 'Ifit3', 'Bst2', 'Ifi47', 'Ifi1')
+gene_list_plot <- gene_list_plot |> unique()
+
+DotPlot_scCustom(seurat,
+                features = gene_list_plot,
+                colors_use=sequential_palette_dotplot,
+                flip_axes = F,
+                dot.scale = 10,
+                dot.min = 0,
+                scale.min = 0,
+                scale.max = 70,
+                x_lab_rotate = T,
+                y_lab_rotate = F) +
+    theme(axis.text.x = element_text(size = 14),
+         axis.text.y = element_text(size = 14),
+         legend.title = element_text(size = 18))
+ggsave(paste0(figures_path, 'DotPlot_ISGs_per_cluster.pdf'), width = 10, height = 20)
+```
+ 
+### Cell Type Annotations
+
+```{r}
+Idents(seurat) <- 'seurat_clusters'
+DimPlot(seurat, label = T)
+```
+
+
+### Annotating clusters
+
+Here I annotate all the clusters based on the top gene per cluster list, the automatic annotations with SingleR, and the plotting of unique genes of interest. Careful annotation has been done so far for B and T cells, while I relied more on the automatic annotations for some of the ILC cell clusters and others.
+
+```{r}
+Idents(seurat) <- 'seurat_clusters'
+seurat <- RenameIdents(seurat
+    , '0' = 'B naive'  
+    , '1' = 'B naive'
+    , '2' = 'CD4 naive'
+    , '3' = 'B naive'
+    , '4' = 'B naive'
+    , '5' = 'ILC3'
+    , '6' = 'T IELs'
+    , '7' = 'CD8b naive' 
+    , '8' = 'B naive'
+    , '9' = 'GC B cells'
+    , '10' = 'GC B cells'
+    , '11' = 'cDC'
+    , '12' = 'Macrophages'
+    , '13' = 'Tregs'
+    , '14' = 'Memory B cells'
+    , '15' = 'Effector T cells'
+    , '16' = 'Plasma cells'
+    , '17' = 'Mast cells' 
+    , '18' = 'gd T cells'
+    , '19' = 'Neutrophils'
+    , '20' = 'Developing B cells?'
+    , '21' = 'Monocytes'
+    , '22' = 'Intestinal Epithelial Cells'
+    , '23' = 'pDCs'
+)
+seurat[['cell_types']] <- Idents(seurat)
+```
+
+```{r}
+#| fig-cap: UMAP plot showing the cell type annotations
+Idents(seurat) <- 'cell_types'
+DimPlot(seurat, label=T, ncol = 2) 
+ggsave(paste0('UMAP_cell_types_', object_annotations, '.pdf'), path = figures_path, width = 7, height = 5)
+
+DimPlot(seurat, label=F, split.by = 'Groups', ncol = 2)
+ggsave(paste0('UMAP_cell_types_by_group_', object_annotations, '.pdf'), path = figures_path, width = 9, height = 5)
+
+p1 <- DimPlot(seurat, label=F, split.by = 'Samples', ncol = 2)
+ggsave(plot = p1, filename = paste0('UMAP_cell_types_by_sample_', object_annotations, '.pdf'), path = figures_path, width = 6, height = 10)
+
+DimPlot(seurat, label=F, group.by = 'Groups')
+ggsave(paste0('UMAP_cell_types_by_group_2_', object_annotations, '.pdf'), path = figures_path, width = 5, height = 5)
+```
+
+### Cell frequency per condition
+
+```{r}
+#| fig-width: 10
+#| fig-height: 6
+# Extracting cell counts for bar graphs
+cell_counts <- FetchData(seurat,vars=c('cell_types', "Samples", 'Groups')) 
+cell_counts <- arrange(cell_counts, Samples)
+
+
+counts <- cell_counts %>% add_count(Samples, name='total_cell_count_by_sample') #%>%  ungroup() %>% arrange( cell_types , desc(hash.ID) ) #%>% arrange('cell_types')
+
+counts <- counts %>% 
+    dplyr::count(cell_types, Samples, total_cell_count_by_sample,name='cluster_count')  |> 
+        mutate(frequency_within_sample=cluster_count*100/total_cell_count_by_sample)  |> 
+        mutate(Samples = as.character(Samples)) |> 
+
+        arrange( Samples, desc(Samples)) #%>% arrange('cell_types')
+
+new_counts <- counts |> 
+    arrange(Samples) |>     
+    pivot_wider(id_cols = cell_types, names_from = 'Samples', values_from = frequency_within_sample)
+    
+write.csv(new_counts,file=paste0(tables_path,"frequency per cell type per condition.csv"),row.names=F)
+
+colors <- c('deeppink', 'deeppink3', 'hotpink', 'hotpink4', 'cadetblue', 'cadetblue2', 'deepskyblue', 'deepskyblue4')
+
+# Barplot of proportion of cells in each cluster by sample
+ggplot(seurat@meta.data) +
+    geom_bar(aes(x=Groups, fill=cell_types), position=position_fill()) + theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+ggsave(paste0(figures_path, 'frequency_per_cell_type_per_group_', object_annotations, '.pdf'))
+
+counts <- cell_counts %>% add_count(Groups, name='total_cell_count_by_sample') #%>%  ungroup() %>% arrange( cell_types , desc(hash.ID) ) #%>% arrange('cell_types')
+counts <- counts %>% 
+    dplyr::count(cell_types, Groups, total_cell_count_by_sample,name='frequency_within_sample')  |> 
+        mutate(frequency_within_sample=frequency_within_sample*100/total_cell_count_by_sample)  
+
+# Barplot of proportion of cells in each cluster by sample
+ggplot(counts) +
+    geom_col(aes(x=cell_types, y = frequency_within_sample,fill=Groups), position=position_dodge()) +
+    theme_classic2() +
+    labs(x = 'Cell type', y = 'Frequency (%)', title = 'Frequency per cell type') +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+ggsave(paste0(figures_path, 'frequency_per_cell_type_per_group_2_', object_annotations, '.pdf'), width = 10, height = 6)
+
+```
+
+:::{.content-visible when-meta='verbose'}
+## Save Object
+:::
+
+```{r}
+saveRDS(seurat, file = here('data/SI_object.rds'))
+```
+
+## Differential Gene Expression Analysis
+
+Given that we don't have biological replicates, I am performing a Wilcoxon test on the existing single-cell dataset, comparing cross-fostering and control conditions for each cell type. Please note that this test is usually not recommended since it treats each cell as a biological replicate, thus leading to a lot of false positives. In general, it is recommended to include biological replicates in the experiment using different hashtags for each mouse, if possible. I am not differentiating between time points given the low cell number.
+
+```{r}
+seurat <- readRDS(here('data/Merged_object_integrated.rds'))
+
+gProfiler2 <- TRUE
+```
+
+```{r}
+#| fig-width: 7.5
+#| fig-height: 7.5
+#| layout-ncol: 2
+#| results: hide
+# genes_of_interest <- list('suppressive signature' = c('Il10', 'Ctla4', 'Tigit', 'Havcr2', 'Gzma', 'Lag3', 'Foxp3'))
+
+path <- paste0(results_path, 'DEG_Wilcox_analysis_Abau_Cre+_vs_Cre-_all_cells')
+unlink(path,recursive = T)
+dir.create(path)
+Idents(seurat) <- 'cell_types'
+
+DEG_counts <- data.frame(matrix(ncol=3, nrow=0))
+colnames(DEG_counts) <- c('DEG_count', 'DEG_UP_count', 'DEG_DOWN_count')
+rnames <- c()
+
+DEG_counts <- DEG_FindMarkers_SCT_assay(seurat, comparison='Groups', group1='B2m-Cre--Abau', group2='B2m-Cre+-Abau', cluster= 'all_cells' , path=path, label_threshold = 10000, max_overlaps = 15,gene_lists_to_plot = NA, FC_threshold = 1,p_value_threshold = 0.05, run_gProfiler2 = gProfiler2, is_integrated_subset = F)
+rnames <- c(rnames, 'all_cells')
+
+for (x in unique(seurat$cell_types)) {
+    # cat(paste0("Cell type: ", x, "\n"))
+    seurat_small <- subset(seurat, subset = cell_types == x )
+    counts <- DEG_FindMarkers_SCT_assay(seurat_small, comparison='Groups', group1='B2m-Cre--Abau', group2='B2m-Cre+-Abau', cluster= x , path=path, label_threshold = 10000, max_overlaps = 15,gene_lists_to_plot = NA, FC_threshold = 1,p_value_threshold = 0.05, run_gProfiler2 = gProfiler2, is_integrated_subset = T)
+    rm(seurat_small)
+    DEG_counts <- rbind(DEG_counts, counts)
+    rnames <- c(rnames, x)
+}
+rownames(DEG_counts) <- rnames
+write.csv(DEG_counts, file = file.path(tables_path, "DEG_counts.csv"))
+DEG_counts
+```
+
+
+# Conclusions

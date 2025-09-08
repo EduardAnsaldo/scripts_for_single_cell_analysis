@@ -1,680 +1,343 @@
-## Initialization
-## Functions
-### Overrepresentation analysis function GO and MSigDB -- ClusterProfiler
-GO_overrepresentation_analysis <- function (significant_genes, all_genes, local_path, ontology = 'ALL', minGSSize = 5, maxGSSize = 500, filename = '') {
-
-     color_scale <- viridis(n = 4, direction = -1)
-     options(enrichplot.colours = color_scale)
-     
-     enrichment_results <- enrichGO(gene = significant_genes, 
-                    universe = all_genes,
-                    keyType = "SYMBOL",
-                    OrgDb = org.Mm.eg.db, 
-                    ont = ontology, 
-                    pAdjustMethod = "BH", 
-                    minGSSize    = minGSSize,
-                    maxGSSize    = maxGSSize,
-                    qvalueCutoff = 0.25)
-
-     enrichment_results_table <- as_tibble(enrichment_results)
-     write.csv(enrichment_results_table, paste0(local_path, filename,'GO_OverRepresentation_analysis_results_', ontology, '.csv'))
-
-     if (nrow(enrichment_results_table) > 1) {
-          ## Add similarity matrix to the termsim slot of enrichment result
-          enrichment_results <- enrichplot::pairwise_termsim(enrichment_results)
-          enrichment_results <- simplify(enrichment_results, cutoff=0.7, by="p.adjust", select_fun=min)
-
-          dotplot(enrichment_results,
-               showCategory=50,
-               title = paste0(filename,'GO Overrepresentation analysis ', ontology),
-               label_format = 60)
-          ggsave(paste0(filename, 'GO overrepresentation_analysis_dotplot_', ontology,'.pdf'), width = 10, height = 18, path = local_path)
-
-          ## Enrichmap clusters the 50 most significant (by padj) GO terms to visualize relationships between terms
-          try(emapplot(enrichment_results, showCategory = (nrow(enrichment_results_table-1))) + ggtitle(paste0(filename, 'Overrepresentation analysis ', ontology)))
-          ggsave(paste0(filename, 'GO_overrepresentation_analysis_network_', ontology,'.pdf'), width = 14, height = 18, path = local_path)
-     }
-}
-
-GO_GSEA_analysis <- function (results, local_path, ontology = 'ALL') {
-     
-     color_scale <- viridis(n = 4, direction = -1)
-     options(enrichplot.colours = color_scale)
-
-          #### GSEA ####
-
-     fold_changes <- results |> arrange(desc(log2FoldChange)) |> pull(log2FoldChange)
-     names(fold_changes) <- results |> arrange(desc(log2FoldChange)) |> pull(genes)
-
-     gsea_results <- gseGO(geneList     = fold_changes,
-               OrgDb        = org.Mm.eg.db,
-               ont          = ontology,
-               keyType = "SYMBOL",
-               minGSSize    = 5,
-               maxGSSize    = 500,
-               pvalueCutoff = 0.05,
-               verbose      = FALSE)               
-
-     gsea_results_table <- as_tibble(gsea_results) 
-     write.csv(gsea_results_table, paste0(local_path, 'Gene_Set_Enrichment_Analysis_results_', ontology,'.csv'))
-
-     if (nrow(gsea_results_table) > 1) {
-          dotplot(gsea_results,
-               showCategory=50,
-               title = paste0('GSEA analysis ', ontology),
-               label_format = 60)
-          ggsave(paste0('GSEA_dotplot_', ontology,'.pdf'), width = 10, height = 18, path = local_path)
-
-          ## Add similarity matrix to thenes,  termsim slot of enrichment result
-          gsea_results <- enrichplot::pairwise_termsim(gsea_results)
-
-          ## Enrichmap clusters the 50 most significant (by padj) GO terms to visualize relationships between terms
-        try(emapplot(gsea_results, showCategory = 60) + ggtitle(paste0('GSEA analysis ', ontology)))
-          ggsave(paste0('GSEA_network_', ontology,'.pdf'), width = 14, height = 18, path = local_path)
-
-## Make individual GSEA plots
-          local_path2 <- paste0(local_path, 'Individual_GSEA_plot_', ontology, '/')
-          unlink(local_path2, recursive = T)
-          dir.create(local_path2)
-
-          for (pathway in head(gsea_results$ID, 20)) {
-               pathway_name <- gsea_results |> as_tibble() |> filter(ID == pathway) |> pull(Description)
-               anno <- gsea_results[pathway, c("NES", "pvalue", "p.adjust")]
-               lab <- paste0(names(anno), "=",  round(anno, 4), collapse="\n")
-
-               try(p1 <- enrichplot::gseaplot2(gsea_results, geneSetID = pathway, pvalue_table = FALSE, subplots = 1, base_size = 13,title = paste0(pathway, ' ', pathway_name)))
-
-               try(x_position <- ggplot_build(p1)$layout$panel_params[[1]]$x.range[2]*0.75)
-               try(y_position <- ggplot_build(p1)$layout$panel_params[[1]]$y.range[2]-(ggplot_build(p1)$layout$panel_params[[1]]$y.range[2]-ggplot_build(p1)$layout$panel_params[[1]]$y.range[1])*0.17)
-
-               try(p1 <- p1 + annotate("text", x_position, y_position, label = lab, hjust=0, vjust=0, size = 5))
-               try(p2 <- enrichplot::gseaplot2(gsea_results, geneSetID = pathway, pvalue_table = FALSE, subplots = 2, base_size = 13))
-               try(p3 <- enrichplot::gseaplot2(gsea_results, geneSetID = pathway, pvalue_table = FALSE, subplots = 3, base_size = 13))
-
-               try(cowplot::plot_grid(p1, p2, p3, ncol = 1, rel_heights = c(1.5, 0.5, 1), align = 'v'))    
-               try(ggsave(paste0('GSEA ',pathway_name , '.pdf'), path = local_path2, height = 10, width = 8))
-               }
-          }
-}
-
-GO_functional_analysis <- function (results,  cluster, path='./') {
-
-     results <- results[which(duplicated(results$genes) == F),]
-#    results$entrezid <-  results |> pull(genes) |> bitr(fromType = 'SYMBOL', toType = 'ENTREZID', OrgDb = 'org.Mm.eg.db', drop = FALSE) |> pull(ENTREZID)
-    #results <- results[which(duplicated(results$entrezid) == F),]
-
-
-####################################### UP ########################################
-
-     local_path <- paste0(path, 'GO_functional_analysis_UP_', cluster, '/')
-     unlink(local_path, recursive = T)
-     dir.create(local_path)
-
-     significant_genes <- results |> filter((padj < 0.05) & (log2FoldChange > 0)) |> arrange(padj) |> pull(genes)
-     all_genes <- results |> arrange(padj) |> pull(genes)
-
-     ######################## ORA ########################
-
-     GO_overrepresentation_analysis(significant_genes, all_genes, local_path, ontology = 'ALL')
-     GO_overrepresentation_analysis(significant_genes, all_genes, local_path, ontology = 'BP')
-     GO_overrepresentation_analysis(significant_genes, all_genes, local_path, ontology = 'MF')
-     GO_overrepresentation_analysis(significant_genes, all_genes, local_path, ontology = 'CC')
-
-     #################### GSEA ####################
-
-     GO_GSEA_analysis(results, local_path, ontology = 'ALL')
-     GO_GSEA_analysis(results, local_path, ontology = 'BP')
-     GO_GSEA_analysis(results, local_path, ontology = 'MF')
-     GO_GSEA_analysis(results, local_path, ontology = 'CC')
-
-######################################## DOWN ########################################
-
-     local_path <- paste0(path, 'GO_functional_analysis_DOWN_', cluster, '/')
-     unlink(local_path, recursive = T)
-     dir.create(local_path)
-
-     significant_genes <- results |> filter((padj < 0.05) & (log2FoldChange < 0)) |> arrange(padj) |> pull(genes)
-     all_genes <- results |> arrange(padj) |> pull(genes)
-
-     ######################## ORA ########################
-
-     GO_overrepresentation_analysis(significant_genes, all_genes, local_path, ontology = 'ALL')
-     GO_overrepresentation_analysis(significant_genes, all_genes, local_path, ontology = 'BP')
-     GO_overrepresentation_analysis(significant_genes, all_genes, local_path, ontology = 'MF')
-     GO_overrepresentation_analysis(significant_genes, all_genes, local_path, ontology = 'CC')
-
-     #################### GSEA ####################
-
-     GO_GSEA_analysis(results, local_path, ontology = 'ALL')
-     GO_GSEA_analysis(results, local_path, ontology = 'BP')
-     GO_GSEA_analysis(results, local_path, ontology = 'MF')
-     GO_GSEA_analysis(results, local_path, ontology = 'CC')
-
-     return()
-}
-
-
-
-
-GO_functional_analysis_cluster_identification <- function (scRNAseq, results, identities = 'seurat_clusters', path='./') {
-
-    color_scale <- viridis(n = 4, direction = -1)
-    options(enrichplot.colours = color_scale)
-     local_path <- paste0(path, 'Cluster_identification_functional_analysis/')
-     unlink(local_path, recursive = T)
-     dir.create(local_path)
-
-     all_genes <- Features(scRNAseq[['RNA']]) |>unique()
-     all_genes_entrezid <- Features(scRNAseq[['RNA']]) |>unique() |> bitr(fromType = 'SYMBOL', toType = 'ENTREZID', OrgDb = 'org.Mm.eg.db', drop = FALSE) |> pull(ENTREZID) |> unique()
-
-     mouse_database <- msigdbr(species = 'Mus musculus',category = 'C8') |> dplyr::select(gs_name, entrez_gene)
-
-for (cluster in unique(scRNAseq@meta.data |> pull(!!identities))) {
-
-####################################### GO ########################################
-
-     name <- paste0('Cluster ', cluster, ' - ')
-
-     significant_results_cluster <- results |> 
-          filter(cluster == cluster) |>
-          pull(gene) |>
-          unique()
-
-     GO_overrepresentation_analysis(significant_results_cluster, all_genes, local_path, ontology = 'ALL', minGSSize = 5, maxGSSize = 2000, filename = name)  
- 
-#################### msigdbr ####################
-
-     significant_results_cluster  <-  significant_results_cluster |> bitr(fromType = 'SYMBOL', toType = 'ENTREZID', OrgDb = 'org.Mm.eg.db', drop = FALSE) |> pull(ENTREZID) |> unique() 
-     enrichment_results <- enricher(gene = significant_results_cluster, 
-                    universe = all_genes_entrezid,
-                    #keyType = "ENTREZID",
-                    #OrgDb = org.Mm.eg.db, 
-                    pAdjustMethod = "BH", 
-                    minGSSize    = 5,
-                    maxGSSize    = 2000,
-                    qvalueCutoff = 0.05,
-                    TERM2GENE = mouse_database)
-                        
-        enrichment_results_table <- as_tibble(enrichment_results)
-        write.csv(enrichment_results_table, paste0(local_path, name,'MSigDbr_OverRepresentation_analysis_results_', 'C8','.csv'))
-
-        if (nrow(enrichment_results_table) > 0) {
-            ## Add similarity matrix to the termsim slot of enrichment result
-            enrichment_results <- enrichplot::pairwise_termsim(enrichment_results)
-            
-            enrichment_results_table <- as_tibble(enrichment_results) 
-            write.csv(enrichment_results_table, paste0(local_path, 'MSigDbr_OverRepresentation_analysis_results_', 'C8','.csv'))
-
-            dotplot(enrichment_results,
-                showCategory=50,
-                title = paste0('MSigDbr Overrepresentation analysis ', 'C8'),
-                label_format = 60)
-            ggsave(paste0(name,'MSigDbr_overrepresentation_analysis_dotplot_', 'C8','.pdf'), width = 10, height = 18, path = local_path)
-
-            ## Enrichmap clusters the 50 most significant (by padj) GO terms to visualize relationships between terms
-            emapplot(enrichment_results, showCategory = 60) + ggtitle(paste0('Overrepresentation analysis ', 'C8'))
-            ggsave(paste0(name,'MSigDbr_overrepresentation_analysis_network_', 'C8','.pdf'), width = 14, height = 18, path = local_path)
-        }
-     
-}
-     return()
-}
-msigdbr_functional_analysis <- function (results,cluster,  path='./') { 
-    
-    results <- results[which(duplicated(results$genes) == F),]
-    results$entrezid <-  results |> pull(genes) |> bitr(fromType = 'SYMBOL', toType = 'ENTREZID', OrgDb = 'org.Mm.eg.db', drop = FALSE) |> pull(ENTREZID)
-    results <- results[which(duplicated(results$entrezid) == F),] |>
-        drop_na(entrezid)
-
-        
-    local_path <- paste0(path, 'MSigDb_functional_analysis_', cluster,'/')
-    unlink(local_path, recursive = T)
-    dir.create(local_path)
-
-    color_scale <- viridis(n = 4, direction = -1)
-    options(enrichplot.colours = color_scale)
-
-    for (database in c('H', 'C2', 'C3', 'C8')) {
-
-        mouse_database <- msigdbr(species = 'Mus musculus',category = database) |> dplyr::select(gs_name, entrez_gene)
-
-        #### ORA ####
-
-        significant_genes <- filter(results, padj < 0.05) |> arrange(padj) |> pull(entrezid)
-        all_genes <- results |> arrange(padj) |> pull(entrezid)
-
-        enrichment_results <- enricher(gene = significant_genes, 
-                        universe = all_genes,
-                        #keyType = "ENTREZID",
-                        #OrgDb = org.Mm.eg.db, 
-                        pAdjustMethod = "BH", 
-                        minGSSize    = 5,
-                        maxGSSize    = 500,
-                        qvalueCutoff = 0.05,
-                        TERM2GENE = mouse_database)
-                        
-        enrichment_results_table <- as_tibble(enrichment_results)
-        write.csv(enrichment_results_table, paste0(local_path, 'OverRepresentation_analysis_results_', database,'.csv'))
-
-        if (nrow(enrichment_results_table) > 0) {
-            ## Add similarity matrix to the termsim slot of enrichment result
-            enrichment_results <- enrichplot::pairwise_termsim(enrichment_results)
-            
-            enrichment_results_table <- as_tibble(enrichment_results) 
-            write.csv(enrichment_results_table, paste0(local_path, 'OverRepresentation_analysis_results_', database,'.csv'))
-
-            dotplot(enrichment_results,
-                showCategory=50,
-                title = paste0('Overrepresentation analysis ', database),
-                label_format = 60)
-            ggsave(paste0('ORA_dotplot_', database,'.pdf'), width = 10, height = 18, path = local_path)
-
-            ## Enrichmap clusters the 50 most significant (by padj) GO terms to visualize relationships between terms
-            emapplot(enrichment_results, showCategory = 60) + ggtitle(paste0('Overrepresentation analysis ', database))
-            ggsave(paste0('ORA_network_', database,'.pdf'), width = 14, height = 18, path = local_path)
-        }
-
-        #### GSEA ####
-
-        fold_changes <- results |> arrange(desc(log2FoldChange)) |> pull(log2FoldChange)
-        names(fold_changes) <- results |> arrange(desc(log2FoldChange)) |> pull(entrezid)
-
-        gsea_results <- GSEA(geneList     = fold_changes,
-                    # OrgDb        = org.Mm.eg.db,
-                    # ont          = "ALL",
-                    # keyType = "SYMBOL",
-                    minGSSize    = 5,
-                    maxGSSize    = 500,
-                    pvalueCutoff = 0.05,
-                    verbose      = FALSE,
-                    TERM2GENE = mouse_database)
-        
-        gsea_results_table <- as_tibble(gsea_results)
-        write.csv(gsea_results_table, paste0(local_path, 'GSEA_analysis_results_', database,'.csv'))
-
-        if (nrow(gsea_results_table) > 1) {
-            gsea_results_table <- as_tibble(gsea_results) 
-            write.csv(gsea_results_table, paste0(local_path, 'GSEA_analysis_results_', database,'.csv'))
-
-            dotplot(gsea_results,
-                showCategory=50,
-                title = paste0('GSEA analysis ', database),
-                label_format = 60)
-            ggsave(paste0('GSEA_dotplot_', database,'.pdf'), width = 10, height = 18, path = local_path)
-
-            ## Add similarity matrix to thenes,  termsim slot of enrichment result
-            gsea_results <- enrichplot::pairwise_termsim(gsea_results)
-
-            ## Enrichmap clusters the 50 most significant (by padj) GO terms to visualize relationships between terms
-            emapplot(gsea_results, showCategory = 60) + ggtitle(paste0('GSEA analysis ', database))
-            ggsave(paste0('GSEA_network_', database,'.pdf'), width = 14, height = 18, path = local_path)
-        }
-        
+#Visualization Functions
+## Scatter Plot Function
+scatterplot <- function (results, group1, group2, cluster, my_colors, local_figures_path, FC_threshold, p_value_threshold, max_overlaps = 30, label_size, label_threshold, distance_from_diagonal_threshold, test_type = c('Wilcox', 'Pseudobulk', 'Bulk'), genes_to_plot = NULL, gene_list_name = NULL) {
+    #Determine test type
+    if (test_type == 'Pseudobulk') {
+        axis_test <- 'Average Normalized Counts'
+    } else if (test_type == 'Bulk') {
+        axis_test <- 'Average Normalized Counts'
+    } else if (test_type == 'Wilcox') {
+        axis_test <- 'Average CPMs'
     }
+    # If genes_to_plot is provided, plot only those genes as described in the first paragraph
+    if (!is.null(genes_to_plot)) {
+        results_scatter <- results |>  
+            drop_na(pvalue) |>
+            mutate(
+                log10_pval = log10(padj+10^-90)*-1,
+                distance_from_diagonal =  (abs((log10(!!sym(paste0('Avg_', group2))+1)) - (log10(!!sym(paste0('Avg_', group1))+1)))/sqrt(2)),
+                genes_to_label_first = ifelse(genes %in% genes_to_plot, genes, NA),
+                diffexpressed = case_when(
+                    log2FoldChange>=FC_threshold & padj < p_value_threshold & !(genes %in% genes_to_plot) ~ 'UP', 
+                    log2FoldChange<=-1*FC_threshold & padj < p_value_threshold & !(genes %in% genes_to_plot)  ~ "DOWN",
+                    genes %in% genes_to_plot & log2FoldChange >= 0 & padj < p_value_threshold ~ 'INTEREST UP',
+                    genes %in% genes_to_plot & log2FoldChange < 0 & padj < p_value_threshold ~ 'INTEREST DOWN',
+                    TRUE ~ 'NO')
+            ) |>
+            mutate(diffexpressed = factor(diffexpressed, levels = c('NO', 'DOWN', 'UP', 'INTEREST DOWN', 'INTEREST UP'))) |>
+            arrange(diffexpressed)
 
-    
-    return()
-}
-pathways_of_interest_analysis <- function (results,  pathways_of_interest, cluster,path='./', FC_threshold = 0.3, p_value_threshold = 0.1, max_overlaps = 1000, label_size = 5, group1, group2, comparison) {
+        my_colors <- c("green4", "darkorchid4", "gray", 'green3', 'darkorchid3')
+        names(my_colors) <- c("DOWN", "UP", "NO", 'INTEREST DOWN', 'INTEREST UP')
 
-    results <- results[which(duplicated(results$genes) == F),]
-    results$entrezid <-  results |> pull(genes) |> bitr(fromType = 'SYMBOL', toType = 'ENTREZID', OrgDb = 'org.Mm.eg.db', drop = FALSE) |> pull(ENTREZID)
-    results <- results[which(duplicated(results$entrezid) == F),] |>
-    drop_na(entrezid)
-        
-    local_path <- paste0(path, 'pathways_of_interest_', cluster, '/')
-    unlink(local_path, recursive = T)
-    dir.create(local_path)
+        limx <- results_scatter |> pull(paste0('Avg_', group1)) |> max()
+        limy <- results_scatter |> pull(paste0('Avg_', group2)) |> max()
+        mylims <- max(limx, limy)*6
 
-
-    pathways_of_interest <- pathways_of_interest |>
-        pivot_longer(cols = everything(),values_to = 'genes', names_to = 'pathway', values_drop_na = TRUE) |>
-        arrange(desc(pathway)) 
-
-    pathways_of_interest$genes <- pathways_of_interest |> pull(genes) |> bitr(fromType = 'SYMBOL', toType = 'ENTREZID', OrgDb = 'org.Mm.eg.db', drop = FALSE) |> pull(ENTREZID) 
-
-    pathways_of_interest <- pathways_of_interest |> filter(!is.na(genes) )
-
-    #head(pathways_of_interest)
-
-    fold_changes <- results |> arrange(desc(log2FoldChange)) |> pull(log2FoldChange)
-    names(fold_changes) <- results |> arrange(desc(log2FoldChange)) |> pull(entrezid)
-
-    for (term_of_interest in unique(pathways_of_interest$pathway)) {
-
-        term <- pathways_of_interest |> filter(pathway == term_of_interest)
-
-        gsea_results <- GSEA(geneList     = fold_changes,
-                    # OrgDb        = org.Mm.eg.db,
-                    # ont          = "ALL",
-                    # keyType = "SYMBOL",
-                    minGSSize    = 4,
-                    maxGSSize    = 500,
-                    pvalueCutoff = 1,
-                    verbose      = FALSE,
-                    TERM2GENE = term)
-                    
-        anno <- gsea_results[term_of_interest, c("NES", "pvalue", "p.adjust")]
-        lab <- paste0(names(anno), "=",  round(anno, 4), collapse="\n")
-
-        p1 <- enrichplot::gseaplot2(gsea_results, geneSetID = term_of_interest, pvalue_table = FALSE, subplots = 1, base_size = 13,title = term_of_interest)
-
-        x_position <- ggplot_build(p1)$layout$panel_params[[1]]$x.range[2]*0.75
-        y_position <- ggplot_build(p1)$layout$panel_params[[1]]$y.range[2]-(ggplot_build(p1)$layout$panel_params[[1]]$y.range[2]-ggplot_build(p1)$layout$panel_params[[1]]$y.range[1])*0.17
-
-        p1 <- p1 + annotate("text", x_position, y_position, label = lab, hjust=0, vjust=0, size = 5)
-        p2 <- enrichplot::gseaplot2(gsea_results, geneSetID = term_of_interest, pvalue_table = FALSE, subplots = 2, base_size = 13)
-        p3 <- enrichplot::gseaplot2(gsea_results, geneSetID = term_of_interest, pvalue_table = FALSE, subplots = 3, base_size = 13)     
-                
-        cowplot::plot_grid(p1, p2, p3, ncol = 1, rel_heights = c(1.5, 0.5, 1), align = 'v')    
-        ggsave(paste0('GSEA_', term_of_interest, '.pdf'), path = local_path, height = 10, width = 8)
-
-        ########## scatterplot ##########
-
-        ## prepare for visualization
-        results <- results %>% 
-                        
-                        mutate(                        
-                            genes_to_label2 = ifelse(entrezid %in% term$genes,  genes ,''),
-                            add_label = ifelse(entrezid %in% term$genes,  'YES' ,'NO')
-                            ) |>
-                        mutate(add_label <- factor(add_label, levels = c('NO', 'YES'))) |>     
-                        mutate(fold_change_direction = case_when(
-                                                log2FoldChange>= 0 ~ 'UP',
-                                                log2FoldChange<= 0 ~ "DOWN",
-                                                TRUE ~ 'NO')) |>
-                        arrange(add_label)
-                         
-                            
-        my_colors <- c( "#32228b", "gray")
-        names(my_colors) <- c("YES", "NO")
-        
-        # Scatterplot
-        limx <- results |> pull(paste0('Avg_', group1)) |> max()
-        limy <- results |> pull(paste0('Avg_', group2)) |> max()
-        mylims <- max(limx, limy)*5
-        
-        results |> 
-            ggplot(aes(x = !!sym(paste0('Avg_', group1)), y = !!sym(paste0('Avg_', group2)), label = genes_to_label2, col = add_label))+
-                geom_point(size=1.3
-                ) +
+        scatter_plot <- results_scatter |> 
+            filter(!is.na(genes_to_label_first)) |>
+            ggplot(aes(x = !!sym(paste0('Avg_', group1)), y = !!sym(paste0('Avg_', group2)), col = diffexpressed))+
+                geom_point(size=1.3) +
                 geom_abline(slope = 1, intercept = 0)+
                 geom_text_repel(
                     size=label_size,
-                    box.padding = 0.2,
+                    box.padding = 0.35,
                     show.legend = FALSE,
-                    max.overlaps = max_overlaps,
-                    max.time = 30,
+                    max.overlaps = Inf,
+                    max.time = 10,
                     max.iter = 10000000,
-                    nudge_x = ifelse(results$fold_change_direction == 'UP', -0.75, 0.75),
-                    nudge_y = ifelse(results$fold_change_direction == 'UP', 0.75, -0.75),
-                    aes(segment.size=0.3, segment.alpha=0.4, segment.curvature=0)) +
+                    nudge_x = ifelse(results_scatter$diffexpressed == 'UP' | results_scatter$diffexpressed == 'INTEREST UP', -1, 1),
+                    nudge_y = ifelse(results_scatter$diffexpressed == 'UP' | results_scatter$diffexpressed == 'INTEREST UP', 0.75, -0.75),
+                    aes(label = genes_to_label_first,segment.size=0.5, segment.alpha=1, segment.curvature=0)) +
             scale_colour_manual(values=my_colors)+
-            
-            
             theme(text=element_text(size=20), legend.position="none")+
-            labs(title=term_of_interest,
-                        x=paste0('Average Normalized Counts in ', group1),
-                        y=paste0('Average Normalized Counts in ',  group2))+       
+            labs(title=paste0(test_type, ' DEGs in ', str_replace(cluster,pattern = '_',replace = ' ') ),
+                        x=paste0(axis_test, ' in ', group1),
+                        y=paste0(axis_test, ' in ',  group2))+
             theme_classic(base_size = 28, base_line_size=1) +
             theme(legend.position="none", 
-                title = element_text(size=11),
+                title = element_text(size=15),
                 axis.text= element_text(size=10),
                 axis.title= element_text(size=13))+
-        scale_x_log10(limits =  c(0.5, mylims))+
-        scale_y_log10(limits =  c(0.5, mylims))
+           scale_x_log10(limits =  c(0.5, mylims))+
+           scale_y_log10(limits =  c(0.5, mylims))
 
-        ggsave(paste0(local_path, 'Pseudobulk scatter ', term_of_interest, '.pdf'))
+        plot_filename <- if (!is.null(gene_list_name)) {
+            paste0(local_figures_path, test_type, '_scatter_', gene_list_name, '_DEG_in_', cluster, '.pdf')
+        } else {
+            paste0(local_figures_path, test_type, '_scatter_genes_of_interest_DEG_in_', cluster, '.pdf')
+        }
+        ggsave(plot = scatter_plot, filename = plot_filename)
+        print(scatter_plot)
+        return(results_scatter)
     }
-    return()
+
+    # Otherwise, do the original function as described
+    ## prepare for visualization
+    results_scatter <- results |>  
+        drop_na(pvalue) |>
+        mutate(
+            log10_pval = log10(padj+10^-90)*-1,
+            distance_from_diagonal =  (abs((log10(!!sym(paste0('Avg_', group2))+1)) - (log10(!!sym(paste0('Avg_', group1))+1)))/sqrt(2))) |>            
+        mutate(
+            genes_to_label_first = ifelse(
+                (log2FoldChange >= FC_threshold | log2FoldChange <= -1 * FC_threshold) &
+                (padj < p_value_threshold) &
+                (distance_from_diagonal > distance_from_diagonal_threshold) &
+                ((!!sym(paste0('Avg_', group2)) > 100) | (!!sym(paste0('Avg_', group1)) > 100)),
+                genes, NA
+            ),
+            genes_to_label_second = ifelse(
+                (log2FoldChange >= FC_threshold | log2FoldChange <= -1 * FC_threshold) &
+                (padj < p_value_threshold) &
+                ((!!sym(paste0('Avg_', group2)) > label_threshold) | (!!sym(paste0('Avg_', group1)) > label_threshold)) &
+                is.na(genes_to_label_first),
+                genes, NA
+            ),
+            genes_to_label = ifelse(
+                (log2FoldChange >= FC_threshold | log2FoldChange <= -1 * FC_threshold) &
+                (padj < p_value_threshold) &
+                is.na(genes_to_label_first) &
+                is.na(genes_to_label_second),
+                genes, NA
+            ),
+            genes_to_label_volcano = ifelse(
+                (log2FoldChange >= FC_threshold | log2FoldChange <= -1 * FC_threshold) &
+                (padj < p_value_threshold),
+                genes, NA
+            ),
+            diffexpressed = case_when(
+                log2FoldChange >= FC_threshold & padj < p_value_threshold ~ 'UP',
+                log2FoldChange <= -1 * FC_threshold & padj < p_value_threshold ~ "DOWN",
+                TRUE ~ 'NO'
+            )
+        ) |>
+        mutate(
+            diffexpressed = factor(diffexpressed, levels = c('NO', 'DOWN', 'UP'))
+        ) |>
+        arrange(diffexpressed)
+    
+    # Scatterplot
+    limx <- results_scatter |> pull(paste0('Avg_', group1)) |> max()
+    limy <- results_scatter |> pull(paste0('Avg_', group2)) |> max()
+    mylims <- max(limx, limy)*6
+       
+    scatter_plot <- results_scatter |> 
+        ggplot(aes(x = !!sym(paste0('Avg_', group1)), y = !!sym(paste0('Avg_', group2)), col = diffexpressed))+
+            geom_point(size=1.3
+            ) +
+            geom_abline(slope = 1, intercept = 0)+
+            geom_text_repel(
+                size=label_size,
+                box.padding = 0.35,
+                show.legend = FALSE,
+                max.overlaps = max_overlaps,
+                max.time = 10,
+                max.iter = 10000000,
+                nudge_x = ifelse(results_scatter$diffexpressed == 'UP', -1, 1),
+                nudge_y = ifelse(results_scatter$diffexpressed == 'UP', 0.75, -0.75),
+                aes(label = genes_to_label_first,segment.size=0.3, segment.alpha=0.4, segment.curvature=0)) +
+            geom_text_repel(
+                size=label_size,
+                box.padding = 0.35,
+                show.legend = FALSE,
+                max.overlaps = 10,
+                max.time = 10,
+                max.iter = 10000000,
+                nudge_x = ifelse(results_scatter$diffexpressed == 'UP', -1, 1),
+                nudge_y = ifelse(results_scatter$diffexpressed == 'UP', 0.75, -0.75),
+                aes(label = genes_to_label_second, segment.size=0.3, segment.alpha=0.4, segment.curvature=0)) +
+            geom_text_repel(
+                size=label_size,
+                box.padding = 0.35,
+                show.legend = FALSE,
+                max.overlaps = 10,
+                max.time = 10,
+                max.iter = 10000000,
+                nudge_x = ifelse(results_scatter$diffexpressed == 'UP', -1, 1),
+                nudge_y = ifelse(results_scatter$diffexpressed == 'UP', 0.75, -0.75),
+                aes(label = genes_to_label, segment.size=0.3, segment.alpha=0.4, segment.curvature=0)) +
+        scale_colour_manual(values=my_colors)+
+        theme(text=element_text(size=20), legend.position="none")+
+        labs(title=paste0(test_type, ' DEGs in ', str_replace(cluster,pattern = '_',replace = ' ') ),
+                    x=paste0(axis_test, ' in ', group1),
+                    y=paste0(axis_test, ' in ',  group2))+
+        theme_classic(base_size = 28, base_line_size=1) +
+        theme(legend.position="none", 
+            title = element_text(size=15),
+            axis.text= element_text(size=10),
+            axis.title= element_text(size=13))+
+       scale_x_log10(limits =  c(0.5, mylims))+
+       scale_y_log10(limits =  c(0.5, mylims))
+
+    ggsave(plot = scatter_plot, filename = paste0(local_figures_path, test_type,'_scatter_DEG_in_', cluster, '.pdf'))
+    print(scatter_plot)
+    return(results_scatter)    
 }
+## Volcano Plot Function
+volcano_plot <- function (results_scatter, group1, group2, cluster, my_colors, local_figures_path, FC_threshold, p_value_threshold, max_overlaps = 15, label_size, label_threshold, test_type = c('Wilcox', 'Pseudobulk', 'Bulk'), genes_to_plot = NULL, gene_list_name = NULL) {
+    #Determine test type
+    if (test_type == 'Pseudobulk') {
+        axis_test <- 'Average Normalized Counts'
+    } else if (test_type == 'Bulk') {
+        axis_test <- 'Average Normalized Counts'
+    } else if (test_type == 'Wilcox') {
+        axis_test <- 'Average CPMs'
+    }
 
+    # If genes_to_plot is provided, plot only those genes as described in the other code blocks
+    if (!is.null(genes_to_plot)) {
+        results_volcano <- results_scatter |>
+            mutate(
+                genes_to_label_first = ifelse(genes %in% genes_to_plot, genes, NA),
+                diffexpressed = case_when(
+                    log2FoldChange>=FC_threshold & padj < p_value_threshold & !(genes %in% genes_to_plot) ~ 'UP', 
+                    log2FoldChange<=-1*FC_threshold & padj < p_value_threshold & !(genes %in% genes_to_plot)  ~ "DOWN",
+                    genes %in% genes_to_plot & log2FoldChange >= 0 & padj < p_value_threshold ~ 'INTEREST UP',
+                    genes %in% genes_to_plot & log2FoldChange < 0 & padj < p_value_threshold ~ 'INTEREST DOWN',
+                    TRUE ~ 'NO')
+            ) |>
+            mutate(diffexpressed = factor(diffexpressed, levels = c('NO', 'DOWN', 'UP', 'INTEREST DOWN', 'INTEREST UP'))) |>
+            arrange(diffexpressed)
 
-pathways_of_interest_analysis2 <- function (results,  pathways_of_interest_table, cluster,path='./', FC_threshold = 0.3, p_value_threshold = 0.1, max_overlaps = 1000, label_size = 5, group1, group2, comparison) {
+        my_colors <- c("green4", "darkorchid4", "gray", 'green3', 'darkorchid3')
+        names(my_colors) <- c("DOWN", "UP", "NO", 'INTEREST DOWN', 'INTEREST UP')
 
-    results <- results[which(duplicated(results$genes) == F),]
-    results$entrezid <-  results |> pull(genes) |> bitr(fromType = 'SYMBOL', toType = 'ENTREZID', OrgDb = 'org.Mm.eg.db', drop = FALSE) |> pull(ENTREZID)
-    results <- results[which(duplicated(results$entrezid) == F),] |>
-    drop_na(entrezid)
-        
-    local_path <- paste0(path, 'pathways_of_interest_', cluster, '/')
-    unlink(local_path, recursive = T)
-    dir.create(local_path)
+        # Filter values which are not significant but with high FC that would bias the plot visualization
+        initial_number_of_genes <- nrow(results_volcano)
+        max_FC_up_significant <- results_volcano %>% filter(diffexpressed != 'NO') %>% dplyr::select(log2FoldChange) %>% max(na.rm = T)
+        min_FC_up_significant <- results_volcano %>% filter(diffexpressed != 'NO') %>% dplyr::select(log2FoldChange) %>% min(na.rm = T)
+        if (min_FC_up_significant > -3 | is.na(min_FC_up_significant)) {
+            min_FC_up_significant <- -3
+        }  
+        if (max_FC_up_significant  < 3 | is.na(max_FC_up_significant)) {
+            max_FC_up_significant <- 3    
+        }
+        results_volcano <- results_volcano %>% filter(!(diffexpressed == 'NO' & (log2FoldChange < min_FC_up_significant | log2FoldChange > max_FC_up_significant)))
+        final_number_of_genes <- nrow(results_volcano)
+        print(paste('Removed', initial_number_of_genes-final_number_of_genes, 'non-significant genes that would bias the plot visualization'))
 
-
-    # pathways_of_interest_table <- pathways_of_interest_table |>
-    #     pivot_longer(cols = everything(),values_to = 'genes', names_to = 'pathway', values_drop_na = TRUE) |>
-    #     arrange(desc(pathway)) 
-
-    # pathways_of_interest_table$genes <- pathways_of_interest_table |> pull(genes) |> bitr(fromType = 'SYMBOL', toType = 'ENTREZID', OrgDb = 'org.Mm.eg.db', drop = FALSE) |> pull(ENTREZID) 
-
-    pathways_of_interest_table <- pathways_of_interest_table |> filter(!is.na(genes) )
-
-    #head(pathways_of_interest_table)
-
-    fold_changes <- results |> arrange(desc(log2FoldChange)) |> pull(log2FoldChange)
-    names(fold_changes) <- results |> arrange(desc(log2FoldChange)) |> pull(entrezid)
-
-    for (term_of_interest in unique(pathways_of_interest_table$gs_name)) {
-
-        term <- pathways_of_interest_table |> filter(gs_name == term_of_interest)
-
-        gsea_results <- GSEA(geneList     = fold_changes,
-                    # OrgDb        = org.Mm.eg.db,
-                    # ont          = "ALL",
-                    # keyType = "SYMBOL",
-                    minGSSize    = 4,
-                    maxGSSize    = 500,
-                    pvalueCutoff = 1,
-                    verbose      = FALSE,
-                    TERM2GENE = term)
-                    
-        anno <- gsea_results[term_of_interest, c("NES", "pvalue", "p.adjust")]
-        lab <- paste0(names(anno), "=",  round(anno, 4), collapse="\n")
-
-        p1 <- enrichplot::gseaplot2(gsea_results, geneSetID = term_of_interest, pvalue_table = FALSE, subplots = 1, base_size = 13,title = term_of_interest)
-
-        x_position <- ggplot_build(p1)$layout$panel_params[[1]]$x.range[2]*0.75
-        y_position <- ggplot_build(p1)$layout$panel_params[[1]]$y.range[2]-(ggplot_build(p1)$layout$panel_params[[1]]$y.range[2]-ggplot_build(p1)$layout$panel_params[[1]]$y.range[1])*0.17
-
-        p1 <- p1 + annotate("text", x_position, y_position, label = lab, hjust=0, vjust=0, size = 5)
-        p2 <- enrichplot::gseaplot2(gsea_results, geneSetID = term_of_interest, pvalue_table = FALSE, subplots = 2, base_size = 13)
-        p3 <- enrichplot::gseaplot2(gsea_results, geneSetID = term_of_interest, pvalue_table = FALSE, subplots = 3, base_size = 13)     
-                
-        cowplot::plot_grid(p1, p2, p3, ncol = 1, rel_heights = c(1.5, 0.5, 1), align = 'v')    
-        ggsave(paste0('GSEA_', term_of_interest, '.pdf'), path = local_path, height = 10, width = 8)
-
-        ########## scatterplot ##########
-
-        ## prepare for visualization
-        results <- results %>% 
-                        
-                        mutate(                        
-                            genes_to_label2 = ifelse(entrezid %in% term$genes,  genes ,''),
-                            add_label = ifelse(entrezid %in% term$genes,  'YES' ,'NO')
-                            ) |>
-                        mutate(add_label <- factor(add_label, levels = c('NO', 'YES'))) |>     
-                        mutate(fold_change_direction = case_when(
-                                                log2FoldChange>= 0 ~ 'UP',
-                                                log2FoldChange<= 0 ~ "DOWN",
-                                                TRUE ~ 'NO')) |>
-                        arrange(add_label)
-                         
-                            
-        my_colors <- c( "#32228b", "gray")
-        names(my_colors) <- c("YES", "NO")
-        
-        # Scatterplot
-        limx <- results |> pull(paste0('Avg_', group1)) |> max()
-        limy <- results |> pull(paste0('Avg_', group2)) |> max()
-        mylims <- max(limx, limy)*5
-        
-        results |> 
-            ggplot(aes(x = !!sym(paste0('Avg_', group1)), y = !!sym(paste0('Avg_', group2)), label = genes_to_label2, col = add_label))+
-                geom_point(size=1.3
-                ) +
-                geom_abline(slope = 1, intercept = 0)+
-                geom_text_repel(
-                    size=label_size,
-                    box.padding = 0.2,
-                    show.legend = FALSE,
-                    max.overlaps = max_overlaps,
-                    max.time = 30,
-                    max.iter = 10000000,
-                    nudge_x = ifelse(results$fold_change_direction == 'UP', -0.75, 0.75),
-                    nudge_y = ifelse(results$fold_change_direction == 'UP', 0.75, -0.75),
-                    aes(segment.size=0.3, segment.alpha=0.4, segment.curvature=0)) +
+        volcano_plot_2 <- results_volcano |> 
+            ggplot(aes(x=log2FoldChange, y=log10_pval, label=genes_to_label_first, col=diffexpressed)) +
+            geom_point(size=1.5) +
+            geom_text_repel(
+                size=label_size,
+                box.padding = 0.35,
+                show.legend = FALSE,
+                max.overlaps = Inf,
+                max.time = 10,
+                max.iter = 10000000,
+                nudge_x = ifelse(results_volcano$diffexpressed == 'UP' | results_volcano$diffexpressed == 'INTEREST UP', 3 ,-3),
+                nudge_y = ifelse(results_volcano$diffexpressed == 'UP', 3, 3),
+                aes(segment.size=0.3, segment.alpha=1, segment.curvature=0)) +
             scale_colour_manual(values=my_colors)+
-            
-            
+            geom_vline(xintercept= FC_threshold, col="lavenderblush2", linetype=2, size=0.5) +
+            geom_vline(xintercept=-FC_threshold, col="lavenderblush2", linetype=2, size=0.5) +
+            geom_hline(yintercept=-1*log10(p_value_threshold), col="lavenderblush2", linetype=2, size=0.5)+
             theme(text=element_text(size=20), legend.position="none")+
-            labs(title=term_of_interest,
-                        x=paste0('Average Normalized Counts in ', group1),
-                        y=paste0('Average Normalized Counts in ',  group2))+       
+            labs(title=paste0(test_type, ' DEGs in ', str_replace(cluster,pattern = '_',replace = ' ') ),
+                        x=paste('Average log2 FC (', group2, '/', group1, ')', sep=''),
+                        y= '-Log10 Adj. p-value')+
             theme_classic(base_size = 28, base_line_size=1) +
             theme(legend.position="none", 
-                title = element_text(size=11),
+                title = element_text(size=15),
                 axis.text= element_text(size=10),
-                axis.title= element_text(size=13))+
-        scale_x_log10(limits =  c(0.5, mylims))+
-        scale_y_log10(limits =  c(0.5, mylims))
-
-        ggsave(paste0(local_path, 'Pseudobulk scatter ', term_of_interest, '.pdf'))
+                axis.title= element_text(size=13),
+                )         +
+                scale_y_continuous(n.breaks = 8) +
+                scale_x_continuous(n.breaks = 8)
+        plot_filename <- if (!is.null(gene_list_name)) {
+            paste0(local_figures_path, test_type, '_volcano_', gene_list_name, '_DEG_in_', cluster, '.pdf')
+        } else {
+            paste0(local_figures_path, test_type, '_volcano_genes_of_interest_DEG_in_', cluster, '.pdf')
+        }
+        ggsave(plot=volcano_plot_2, filename = plot_filename)
+        print(volcano_plot_2)
+        return(invisible(NULL))
     }
-    return()
-}
 
-
-### Over representation analysis -- gProfiler2
-gProfiler2_overrepresentation_analysis <- function (significant_genes_FC_ordered, local_path, comparison, filename = '') {
-
-    significant_genes_FC_ordered <- list(comparison = significant_genes_FC_ordered)
-    # Enrichment pathway analysis
-    enrichment_results <- gost(query = significant_genes_FC_ordered, 
-                    organism = "mmusculus", ordered_query = TRUE, 
-                    multi_query = FALSE, significant = TRUE, exclude_iea = FALSE, 
-                    measure_underrepresentation = FALSE, evcodes = FALSE, 
-                    user_threshold = 0.05, correction_method = "g_SCS", 
-                    domain_scope = "annotated", custom_bg = NULL, 
-                    numeric_ns = "", sources = NULL, as_short_link = FALSE, highlight = TRUE)
-
-    if (!(is.null(enrichment_results[['result']]) )) {
-
-     # Manhattan plot of results
-     plot  <- gostplot(enrichment_results, capped = T, interactive=T)
-     htmlwidgets::saveWidget((plot), paste0(local_path, filename, 'Pathway_enrichment_analysis_gprofiler2', '.html'))
-
-     # Saving results tablec
-     enrichment_results <- enrichment_results[['result']] |> dplyr::select(-c('parents'))
-     write.csv(enrichment_results, paste0(local_path, filename, 'Pathway_enrichment_analysis_gprofiler2', '.csv')) 
+    # Otherwise, do the original function as described
+    initial_number_of_genes <- nrow(results_scatter)
+    max_FC_up_significant <- results_scatter %>% filter(diffexpressed != 'NO') %>% dplyr::select(log2FoldChange) %>% max(na.rm = T)
+    min_FC_up_significant <- results_scatter %>% filter(diffexpressed != 'NO') %>% dplyr::select(log2FoldChange) %>% min(na.rm = T)
+    if (min_FC_up_significant > -3 | is.na(min_FC_up_significant)) {
+        min_FC_up_significant <- -3
+    }  
+    if (max_FC_up_significant  < 3 | is.na(max_FC_up_significant)) {
+        max_FC_up_significant <- 3    
     }
-    
+    results_volcano <- results_scatter %>% filter(!(diffexpressed == 'NO' & (log2FoldChange < min_FC_up_significant | log2FoldChange > max_FC_up_significant)))
+    final_number_of_genes <- nrow(results_volcano)
+    print(paste('Removed', initial_number_of_genes-final_number_of_genes, 'non-significant genes that would bias the plot visualization'))
+
+    volcano_plot <- results_volcano |> 
+        arrange(desc(padj)) |>
+        ggplot(aes(x=log2FoldChange, y=log10_pval, label=genes_to_label_volcano, col=diffexpressed)) +
+        geom_point(size=1.5) +
+        geom_text_repel(
+            size=label_size,
+            box.padding = 0.35,
+            show.legend = FALSE,
+            max.overlaps = max_overlaps,
+            max.time = 10,
+            max.iter = 10000000,
+            aes(segment.size=0.5, segment.alpha=0.8, segment.curvature=0)) +
+        scale_colour_manual(values=my_colors)+
+        geom_vline(xintercept=FC_threshold, col="lavenderblush2", linetype=2, size=0.5) +
+        geom_vline(xintercept=-FC_threshold, col="lavenderblush2", linetype=2, size=0.5) +
+        geom_hline(yintercept=-1*log10(p_value_threshold), col="lavenderblush2", linetype=2, size=0.5)+
+        theme(text=element_text(size=20), legend.position="none")+
+        labs(title=paste0(test_type, ' DEGs in ', str_replace(cluster,pattern = '_',replace = ' ') ),
+                    x=paste('Average log2 FC (', group2, '/', group1, ')', sep=''),
+                    y= '-Log10 Adj. p-value')+
+        theme_classic(base_size = 28, base_line_size=1) +
+        theme(legend.position="none", 
+            title = element_text(size=15),
+            axis.text= element_text(size=10),
+            axis.title= element_text(size=13),
+            )         +
+            scale_y_continuous(n.breaks = 8) +
+            scale_x_continuous(n.breaks = 8)
+    ggsave(plot = volcano_plot, filename = paste0(local_figures_path, test_type, '_volcano_DEG_in_', cluster, '.pdf'))
+    print(volcano_plot)
 }
 
-gProfiler2_functional_analysis <- function (results,  cluster, comparison, path='./', FC_threshold) {
+# Pseudobulk function
 
-     results <- results[which(duplicated(results$genes) == F),]
+pseudobulk <- function (scRNAseq, comparison, group1, group2, cluster='all_clusters', path='./', FC_threshold = 0.3, p_value_threshold = 0.05, max_overlaps = 15, label_size = 5, pathways_of_interest = NULL, label_threshold = 100000, distance_from_diagonal_threshold = 0.4, gene_lists_to_plot = NULL, expression_threshold_for_gene_list = 20, colors = c('green4', 'darkorchid4'), minimum_cell_number = 10, run_gProfiler2 = FALSE) {
 
-
-####################################### UP ########################################
-
-     local_path <- paste0(path, 'Functional_analysis_UP_gProfiler2_', cluster, '_', comparison, '/')
-     unlink(local_path, recursive = T)
-     dir.create(local_path)
-     print(colnames(results))
-
-     significant_genes <- results |> filter((padj < 0.05) & (log2FoldChange > FC_threshold)) |> arrange(padj) |> arrange(desc(log2FoldChange)) |> pull(genes)
-     
-     if (length(significant_genes) > 2) {
-          gProfiler2_overrepresentation_analysis(significant_genes, local_path =  local_path , comparison = comparison, filename = '')
-
-     }
-
-######################################## DOWN ########################################
-
-     local_path <- paste0(path, 'Functional_analysis_DOWN_gProfiler2_', cluster, '_', comparison, '/')
-     unlink(local_path, recursive = T)
-     dir.create(local_path)
-
-     significant_genes <- results |> filter((padj < 0.05) & (log2FoldChange < -1*FC_threshold)) |> arrange(padj) |> arrange(log2FoldChange) |> pull(genes)
-
-     if (length(significant_genes) > 2) {
-          gProfiler2_overrepresentation_analysis(significant_genes, local_path =  local_path , comparison = comparison, filename = '')
-     }
-
-     return()
-}
-
-gProfiler2_functional_analysis_cluster_identification <- function (scRNAseq, results, identities = 'seurat_clusters', path='./') {
-
-    color_scale <- viridis(n = 4, direction = -1)
-    options(enrichplot.colours = color_scale)
-     local_path <- paste0(path, 'Cluster_identification_functional_analysis_gProfiler2/')
-     unlink(local_path, recursive = T)
-     dir.create(local_path)
-
-     all_genes <- Features(scRNAseq[['RNA']]) |>unique()
-     #all_genes_entrezid <- Features(scRNAseq[['RNA']]) |>unique() |> bitr(fromType = 'SYMBOL', toType = 'ENTREZID', OrgDb = 'org.Mm.eg.db', drop = FALSE) |> pull(ENTREZID) |> unique()
-
-     #mouse_database <- msigdbr(species = 'Mus musculus',category = 'C8') |> dplyr::select(gs_name, entrez_gene)
-
-for (cluster in levels(scRNAseq@meta.data |> pull(!!identities))) {
-
-
-     name <- paste0('Cluster ', cluster, ' - ')
-
-     significant_results_cluster <- results |> 
-          filter(cluster == cluster) |>
-          pull(gene) |>
-          unique()
-    
-     gProfiler2_overrepresentation_analysis(significant_results_cluster, local_path, comparison = 'clusters', filename =  name )
- 
-
-     }
-     return()
-}
-### Pseudobulk function
-########## Pseudobulk ##########
-
-pseudobulk <- function (scRNAseq, comparison, group1, group2, cluster='all_clusters', path='./', FC_threshold = 0.3, p_value_threshold = 0.05, max_overlaps = 15, label_size = 5, pathways_of_interest = NULL, label_threshold = 100000, distance_from_diagonal_threshold = 0.4, gene_lists_to_plot = NULL, expression_threshold_for_gene_list = 20, colors = c('green4', 'darkorchid4')) {
-
+    # Set colors for the plot
     my_colors <- c(colors, "gray")
     names(my_colors) <- c("DOWN", "UP", "NO")
-
-    gene_lists_path <- paste0(path, 'gene_lists/')
-    figures_path <- paste0(path, 'figures/')
-
-    # unlink(gene_lists_path, recursive = T)
-    # unlink(figures_path, recursive = T)
+    # Set Paths
+    gene_lists_path <- here(path, 'gene_lists')
+    local_figures_path <- here(path, 'figures')
     dir.create(gene_lists_path)
-    dir.create(figures_path)
+    dir.create(local_figures_path)
     print(paste('Cluster',cluster))
+
+    group1 <- fixed(group1)
+    group2 <- fixed(group2)
 
     Idents(scRNAseq) <- comparison
 
-
-    ########## Continue here ##########
-
     print('number of cells in group 1')
-    #print(scRNAseq@meta.data |> filter( !!sym(comparison) 'Cluster Annotations'in'Cluster Annotations' c(group1) ) |> nrow())
     print(scRNAseq@meta.data |> filter(str_detect( !!as.name(comparison) , group1 )) |> nrow())
     print('number of cells in group 2')
     print(scRNAseq@meta.data |> filter(str_detect( !!as.name(comparison) , group2 )) |> nrow())
     
-
-
-    #Checked there are enough cells
+    #Check there are enough cells
     if ((scRNAseq@meta.data |> 
             filter(str_detect( !!as.name(comparison) , group1 )) |> 
-            nrow()  < 10) | 
-            (scRNAseq@meta.data |> filter(str_detect( !!as.name(comparison) , group2 )) |> nrow()  < 10)) {
+            nrow()  < minimum_cell_number) | 
+            (scRNAseq@meta.data |> filter(str_detect( !!as.name(comparison) , group2 )) |> nrow()  < minimum_cell_number)) {
         DEG_count <- 'Not enough cells'
         DEG_UP_count <- 'Not enough cells'
         DEG_DOWN_count <- 'Not enough cells'
         return(c(all_count=DEG_count, UP_count=DEG_UP_count, DOWN_count=DEG_DOWN_count))
     }
     
+    # Aggregate counts
     counts <- AggregateExpression(scRNAseq, group.by=c(comparison),
                             assays='RNA',
                             slot='counts',
@@ -682,9 +345,6 @@ pseudobulk <- function (scRNAseq, comparison, group1, group2, cluster='all_clust
 
     counts <- counts$RNA |> as.data.frame()
 
-    # print(counts)
-    # print(colnames( counts ))
-    
     # Run DE Analysis
     #Generate sample level metadata
     colData <- data.frame(samples=colnames(counts)) |>
@@ -707,20 +367,15 @@ pseudobulk <- function (scRNAseq, comparison, group1, group2, cluster='all_clust
     }
     
     #Create DESeq2 object
-    
     dds <- DESeqDataSetFromMatrix(countData = counts,
-                            colData = colData,
-                            design = ~condition)
-
-    dds$condition <- factor(dds$condition, levels = c(group1, group2))
-
-    
+        colData = colData,
+        design = ~condition)
+    dds$condition <- factor(dds$condition, levels = c(group1, group2))    
 
     ## DESeq2 QC
     rld <- rlog(dds, blind=TRUE) #rlog normalization
-
     DESeq2::plotPCA(rld, ntop=500, intgroup='condition') #PCA
-    ggsave(filename=paste0('Pseudobulk_PCA_', cluster, '.pdf'), path=figures_path) 
+    ggsave(filename=paste0('Pseudobulk_PCA_', cluster, '.pdf'), path=local_figures_path) 
     PCA_table <- DESeq2::plotPCA(rld, ntop=500, intgroup='condition', returnData = T) #PCA table
     write.csv(PCA_table, file=paste(path, 'PCA_pseudobulk', cluster, group2, 'vs', group1, '.csv', sep='_'))
 
@@ -736,581 +391,304 @@ pseudobulk <- function (scRNAseq, comparison, group1, group2, cluster='all_clust
     #Get Normalized Counts
     normalized_counts <- counts(dds, normalized = T)
     normalized_counts <- normalized_counts |>
-            as.data.frame() |>
-            rownames_to_column('genes') |>
-            as_tibble() |>
-            rowwise() |>
-            mutate(
-                !!paste0('Avg_', group2) := mean(c_across(contains(group2))),
-                !!paste0('Avg_', group1) := mean(c_across(contains(group1))),
-            ) |>
-            ungroup()
+        as.data.frame() |>
+        rownames_to_column('genes') |>
+        as_tibble() |>
+        rowwise() |>
+        mutate(
+            !!paste0('Avg_', group2) := mean(c_across(contains(group2))),
+            !!paste0('Avg_', group1) := mean(c_across(contains(group1))),
+        ) |>
+        ungroup()
 
     #Add gene annotations:
-    annotations <- read.csv("M:/LPD-MIS members' data/Eduard Ansaldo/Bioinformatics/analysis_templates/annotations.csv")
+    annotations <- read.csv(here('scripts', 'annotations.csv'))
     results <- results |>
                     rownames_to_column('genes') |>
                     left_join(y= unique(annotations[,c('gene_name', 'description')]),
                         by = c('genes' = 'gene_name')) |>
                     left_join(y = normalized_counts, by = c('genes' = 'genes'))
 
-    head(results)
-
-    results_filtered <- filter(results, padj < p_value_threshold & ((!!sym(paste0('Avg_', group2)) > expression_threshold_for_gene_list) | !!sym(paste0('Avg_', group1)) > expression_threshold_for_gene_list) & (log2FoldChange >= FC_threshold | log2FoldChange  <= -1*FC_threshold)) %>% arrange(padj)
+    # Filter results 
+    results_filtered <- filter(
+        results,
+        padj < p_value_threshold &
+            ((!!sym(paste0('Avg_', group2)) > expression_threshold_for_gene_list) |
+                (!!sym(paste0('Avg_', group1)) > expression_threshold_for_gene_list)
+            ) &(log2FoldChange >= FC_threshold |
+                log2FoldChange <= -1 * FC_threshold)) |> 
+        arrange(padj)
     results_filtered_UP <- filter(results_filtered, log2FoldChange >  FC_threshold) 
     results_filtered_DOWN <- filter(results_filtered, log2FoldChange <  FC_threshold)
 
-
-
-    write.csv(results |> arrange(desc(padj)), file= paste(paste(gene_lists_path, 'ALL_GENES_DEG_Analysis', sep=''), 'pseudobulk', cluster, group2, 'vs', group1, '.csv', sep='_'))
-    write.csv(results_filtered_UP, file=paste(paste(gene_lists_path, 'DEG_UP', sep=''), 'pseudobulk', cluster, group2, 'vs', group1, '.csv', sep='_'))
-    write.csv(results_filtered_DOWN, file=paste(paste(gene_lists_path, 'DEG_DOWN', sep=''), 'pseudobulk', cluster, group2, 'vs', group1, '.csv', sep='_'))
-
-        
+    # Write results to CSV files
+    write.csv(results |> arrange(padj), file= here(gene_lists_path, paste('ALL_GENES_DEG_Analysis', cluster, 'pseudobulk', group2, 'vs', group1, '.csv', sep='_')))
+    write.csv(results_filtered_UP |> arrange(desc(log2FoldChange)), file=here(gene_lists_path, paste('DEG_UP_in', group2, cluster, 'pseudobulk', group2, 'vs', group1, '.csv', sep='_')))
+    write.csv(results_filtered_DOWN |> arrange(log2FoldChange), file=here(gene_lists_path, paste('DEG_DOWN_in', group2, cluster, 'pseudobulk', group2, 'vs', group1, '.csv', sep='_')))
 
     # Return number of DEGs:
     DEG_count <- nrow(results_filtered)
     DEG_UP_count <- nrow(results_filtered_UP)
     DEG_DOWN_count <- nrow(results_filtered_DOWN)
 
+    # Generate scatter and volcano plots
+    results_scatter <- scatterplot(results, group1, group2, cluster, my_colors, local_figures_path, FC_threshold, p_value_threshold, max_overlaps = 15, label_size, label_threshold, distance_from_diagonal_threshold, test_type = 'Pseudobulk')
+    volcano_plot(results_scatter, group1, group2, cluster, my_colors, local_figures_path, FC_threshold, p_value_threshold, max_overlaps = 15, label_size, label_threshold, test_type ='Pseudobulk')
 
-    ## prepare for visualization
-    results_scatter <- results %>% 
-                    drop_na(pvalue) |>
-                    mutate(
-                        log10_pval = log10(padj+10^-90)*-1,
-                        distance_from_diagonal =  (abs((log10(!!sym(paste0('Avg_', group2))+1)) - (log10(!!sym(paste0('Avg_', group1))+1)))/sqrt(2)) ,
-                        #bottom_limit = (!!sym(paste0('Avg_', group1))-x_intercept^2)/!!sym(paste0('Avg_', group1)),
-                        #top_limit = bottom_limitp
-                         )
-                        
-    results_scatter <- results_scatter |> mutate(
-                        genes_to_label_first = ifelse((log2FoldChange >= FC_threshold | log2FoldChange  <= -1*FC_threshold)  & (padj < p_value_threshold) & (distance_from_diagonal > distance_from_diagonal_threshold) & ((!!sym(paste0('Avg_', group2)) > 100) | !!sym(paste0('Avg_', group1)) > 100), genes,NA),
-                        genes_to_label_second  = ifelse((log2FoldChange >= FC_threshold | log2FoldChange  <= -1*FC_threshold)  & (padj < p_value_threshold) & ((!!sym(paste0('Avg_', group2)) > label_threshold) | !!sym(paste0('Avg_', group1)) > label_threshold) & is.na(genes_to_label_first), genes,NA),
-                        genes_to_label = ifelse((log2FoldChange >= FC_threshold | log2FoldChange  <= -1*FC_threshold)  & (padj < p_value_threshold) & is.na(genes_to_label_first) & is.na(genes_to_label_second), genes,NA),
-                        genes_to_label_volcano = ifelse((log2FoldChange >= FC_threshold | log2FoldChange  <= -1*FC_threshold)  & (padj < p_value_threshold), genes,NA),
-                        diffexpressed = case_when(
-                            log2FoldChange>=FC_threshold & padj < p_value_threshold  ~ 'UP', 
-                            log2FoldChange<=-1*FC_threshold & padj < p_value_threshold  ~ "DOWN",
-                            TRUE ~ 'NO'))  |>
-                    mutate(diffexpressed = factor(diffexpressed, levels = c('NO', 'DOWN', 'UP'))) |>
-                    arrange(diffexpressed)          
-    
-    print(head(results_scatter |> filter(diffexpressed != 'NO') |> arrange(desc(distance_from_diagonal)) |> pull(distance_from_diagonal), n = 11))
-
-    #ggplot(results, aes(x= !!paste0('Avg_', group1), y = !!paste0('Avg_', group2), label = genes_to_label, col = diffexpressed))+
-
-    
-    # Scatterplot
-
-    limx <- results_scatter |> pull(paste0('Avg_', group1)) |> max()
-    limy <- results_scatter |> pull(paste0('Avg_', group2)) |> max()
-    mylims <- max(limx, limy)*6
-       
-    plot <- results_scatter |> 
-        ggplot(aes(x = !!sym(paste0('Avg_', group1)), y = !!sym(paste0('Avg_', group2)), col = diffexpressed))+
-            geom_point(size=1.3
-            ) +
-            geom_abline(slope = 1, intercept = 0)+
-            geom_text_repel(
-                size=label_size,
-                box.padding = 0.35,
-                show.legend = FALSE,
-                max.overlaps = 30,
-                max.time = 10,
-                max.iter = 10000000,
-                nudge_x = ifelse(results_scatter$diffexpressed == 'UP', -1, 1),
-                nudge_y = ifelse(results_scatter$diffexpressed == 'UP', 0.75, -0.75),
-                aes(label = genes_to_label_first,segment.size=0.3, segment.alpha=0.4, segment.curvature=0)) +
-            geom_text_repel(
-                size=label_size,
-                box.padding = 0.35,
-                show.legend = FALSE,
-                max.overlaps = 10,
-                max.time = 10,
-                max.iter = 10000000,
-                nudge_x = ifelse(results_scatter$diffexpressed == 'UP', -1, 1),
-                nudge_y = ifelse(results_scatter$diffexpressed == 'UP', 0.75, -0.75),
-                aes(label = genes_to_label_second, segment.size=0.3, segment.alpha=0.4, segment.curvature=0)) +
-            geom_text_repel(
-                size=label_size,
-                box.padding = 0.35,
-                show.legend = FALSE,
-                max.overlaps = 10,
-                max.time = 10,
-                max.iter = 10000000,
-                nudge_x = ifelse(results_scatter$diffexpressed == 'UP', -1, 1),
-                nudge_y = ifelse(results_scatter$diffexpressed == 'UP', 0.75, -0.75),
-                aes(label = genes_to_label, segment.size=0.3, segment.alpha=0.4, segment.curvature=0)) +
-        scale_colour_manual(values=my_colors)+
-        theme(text=element_text(size=20), legend.position="none")+
-        labs(title=paste('Pseudobulk DEGs in', str_replace(cluster,pattern = '_',replace = ' ') ),
-                    x=paste0('Average Normalized Counts in ', group1),
-                    y=paste0('Average Normalized Counts in ',  group2))+
-        theme_classic(base_size = 28, base_line_size=1) +
-        theme(legend.position="none", 
-            title = element_text(size=11),
-            axis.text= element_text(size=10),
-            axis.title= element_text(size=13))+
-       scale_x_log10(limits =  c(0.5, mylims))+
-       scale_y_log10(limits =  c(0.5, mylims))
-
-    ggsave(plot = scatter_plot, paste0(figures_path, 'Pseudobulk scatter DEG in ', cluster, '.pdf'))
-    print(scatter_plot)
-
-
-    #Filter values which are not significant but with high  FC that would bias the plot visualization
-    initial_number_of_genes <- nrow(results_scatter)
-    max_FC_up_significant <- results_scatter %>% filter(diffexpressed != 'NO') %>% dplyr::select(log2FoldChange) %>% max(na.rm = T)
-    min_FC_up_significant <- results_scatter %>% filter(diffexpressed != 'NO') %>% dplyr::select(log2FoldChange) %>% min(na.rm = T)
-    if (min_FC_up_significant > -3 | is.na(min_FC_up_significant)) {
-        min_FC_up_significant <- -3
-    }  
-    if (max_FC_up_significant  < 3 | is.na(max_FC_up_significant)) {
-        max_FC_up_significant <- 3    
-    }
-    results_volcano <- results_scatter %>% filter(!(diffexpressed == 'NO' & (log2FoldChange < min_FC_up_significant | log2FoldChange > max_FC_up_significant)))
-    final_number_of_genes <- nrow(results_volcano)
-    print(paste('Removed', initial_number_of_genes-final_number_of_genes, 'non-significant genes that would bias the plot visualization'))
-
-    # # Volcano Plot
-    volcano_plot <- results_volcano |> 
-        arrange(desc(padj)) |>
-        ggplot(aes(x=log2FoldChange, y=log10_pval, label=genes_to_label_volcano, col=diffexpressed)) +
-        geom_point(size=1.5) +
-        geom_text_repel(
-            size=label_size,
-            box.padding = 0.35,
-            show.legend = FALSE,
-            max.overlaps = max_overlaps,
-            max.time = 10,
-            max.iter = 10000000,
-            aes(segment.size=0.5, segment.alpha=0.8, segment.curvature=0)) +
-        scale_colour_manual(values=my_colors)+
-        geom_vline(xintercept=FC_threshold, col="lavenderblush2", linetype=2, size=0.5) +
-        geom_vline(xintercept=-FC_threshold, col="lavenderblush2", linetype=2, size=0.5) +
-        geom_hline(yintercept=-1*log10(p_value_threshold), col="lavenderblush2", linetype=2, size=0.5)+
-        theme(text=element_text(size=20), legend.position="none")+
-        labs(title=paste('Pseudobulk DEGs in', str_replace(cluster,pattern = '_',replace = ' ') ),
-                    x=paste('Average log2 FC (', group2, '/', group1, ')', sep=''),
-                    y= 'Log10 Adj. p-value')+
-        # coord_cartesian(xlim=c(-1.15, 1.15), ylim = c(0, 95), expand = FALSE)+
-        theme_classic(base_size = 28, base_line_size=1) +
-        theme(legend.position="none", 
-            title = element_text(size=15),
-            axis.text= element_text(size=10),
-            axis.title= element_text(size=13),
-            )         +
-            scale_y_continuous(n.breaks = 8) +
-            scale_x_continuous(n.breaks = 8)
-    ggsave(plot = volcano_plot,paste0(figures_path, 'Pseudobulk volcano DEG in ', cluster, '.pdf'))
-    print(volcano_plot)
-
-########## Overrepresentation analysis ##########
-
-gProfiler2_functional_analysis(results,  cluster = cluster, comparison = comparison, path= path , FC_threshold = FC_threshold)
-
-
-if (!is.null(pathways_of_interest)) {
-    pathways_of_interest_analysis(results = results, pathways_of_interest = pathways_of_interest,  cluster = cluster, path = path, group1 = group1, group2 = group2, comparison = comparison)
+    ########## Overrepresentation analysis ##########
+    if (run_gProfiler2) {
+        gProfiler2_functional_analysis(results,  cluster = cluster, comparison = comparison, path= path , FC_threshold = FC_threshold)
+        if (!is.null(pathways_of_interest)) {
+            pathways_of_interest_analysis(results = results, pathways_of_interest = pathways_of_interest,  cluster = cluster, path = path, group1 = group1, group2 = group2, comparison = comparison)
+        }
     }
 
-########## Plotting individual genes of interest ##########
+    ########## Plotting individual genes of interest ##########
     if (!is.null(gene_lists_to_plot)) {
         for (gene_list in names(gene_lists_to_plot)) {
-            genes_to_plot <- gene_lists_to_plot[[gene_list]]
-            
+            genes_to_plot <- gene_lists_to_plot[[gene_list]]                    
             print(genes_to_plot)
-            
-        
-        results_scatter <- results_scatter |> mutate(
-                            genes_to_label_first = ifelse(genes %in% genes_to_plot, genes, NA),
-                            diffexpressed = case_when(
-                                log2FoldChange>=FC_threshold & padj < p_value_threshold & !(genes %in% genes_to_plot) ~ 'UP', 
-                                log2FoldChange<=-1*FC_threshold & padj < p_value_threshold & !(genes %in% genes_to_plot)  ~ "DOWN",
-                                genes %in% genes_to_plot & log2FoldChange >= 0 & padj < p_value_threshold ~ 'INTEREST UP',
-                                genes %in% genes_to_plot & log2FoldChange < 0 & padj < p_value_threshold ~ 'INTEREST DOWN',
-                                TRUE ~ 'NO'))  |>
-                        mutate(diffexpressed = factor(diffexpressed, levels = c('NO', 'DOWN', 'UP', 'INTEREST DOWN', 'INTEREST UP'))) |>
-                        arrange(diffexpressed)          
-        
-        my_colors <- c("green4", "darkorchid4", "gray", 'green3', 'darkorchid3')
-        names(my_colors) <- c("DOWN", "UP", "NO", 'INTEREST DOWN', 'INTEREST UP')
+            # Generate scatter and volcano plots
+            results_scatter <- scatterplot(genes_to_plot = genes_to_plot, gene_list_name = gene_list, results, group1, group2, cluster, my_colors, local_figures_path, FC_threshold, p_value_threshold, max_overlaps = 15, label_size, label_threshold, distance_from_diagonal_threshold, test_type = 'Pseudobulk')
+            volcano_plot(genes_to_plot = genes_to_plot, gene_list_name = gene_list, results_scatter, group1, group2, cluster, my_colors, local_figures_path, FC_threshold, p_value_threshold, max_overlaps = 15, label_size, label_threshold, test_type = 'Pseudobulk')
 
-        print(head(results_scatter |> filter(diffexpressed != 'NO') |> arrange(desc(distance_from_diagonal)) |> pull(distance_from_diagonal), n = 11))
-
-        #ggplot(results, aes(x= !!paste0('Avg_', group1), y = !!paste0('Avg_', group2), label = genes_to_label, col = diffexpressed))+
-
-        
-        # Scatterplot
-
-        limx <- results_scatter |> pull(paste0('Avg_', group1)) |> max()
-        limy <- results_scatter |> pull(paste0('Avg_', group2)) |> max()
-        mylims <- max(limx, limy)*6
-        
-        scatter_plot_2 <- results_scatter |> 
-            ggplot(aes(x = !!sym(paste0('Avg_', group1)), y = !!sym(paste0('Avg_', group2)), col = diffexpressed))+
-                geom_point(size=1.3
-                ) +
-                geom_abline(slope = 1, intercept = 0)+
-                geom_text_repel(
-                    size=label_size,
-                    box.padding = 0.35,
-                    show.legend = FALSE,
-                    max.overlaps = Inf,
-                    max.time = 10,
-                    max.iter = 10000000,
-                    nudge_x = ifelse(results_scatter$diffexpressed == 'UP' | results_scatter$diffexpressed == 'INTEREST UP', -1, 1),
-                    nudge_y = ifelse(results_scatter$diffexpressed == 'UP' | results_scatter$diffexpressed == 'INTEREST UP', 0.75, -0.75),
-                    aes(label = genes_to_label_first,segment.size=0.5, segment.alpha=1, segment.curvature=0)) +
-            
-            scale_colour_manual(values=my_colors)+
-            theme(text=element_text(size=20), legend.position="none")+
-            labs(title=paste('Pseudobulk DEGs in', str_replace(cluster,pattern = '_',replace = ' ') ),
-                        x=paste0('Average Normalized Counts in ', group1),
-                        y=paste0('Average Normalized Counts in ',  group2))+
-            theme_classic(base_size = 28, base_line_size=1) +
-            theme(legend.position="none", 
-                title = element_text(size=11),
-                axis.text= element_text(size=10),
-                axis.title= element_text(size=13))+
-        scale_x_log10(limits =  c(0.5, mylims))+
-        scale_y_log10(limits =  c(0.5, mylims))
-
-        ggsave(plot=scatter_plot_2, paste0(figures_path, 'Pseudobulk scatter ',gene_list,' in ', cluster, ' ', group2, ' vs ', group1, '.pdf'))
-        print(scatter_plot_2)
-
-
-
-        #Filter values which are not significant but with high  FC that would bias the plot visualization
-        initial_number_of_genes <- nrow(results_scatter)
-        max_FC_up_significant <- results_scatter %>% filter(diffexpressed != 'NO') %>% dplyr::select(log2FoldChange) %>% max(na.rm = T)
-        min_FC_up_significant <- results_scatter %>% filter(diffexpressed != 'NO') %>% dplyr::select(log2FoldChange) %>% min(na.rm = T)
-        if (min_FC_up_significant > -3 | is.na(min_FC_up_significant)) {
-            min_FC_up_significant <- -3
-        }  
-        if (max_FC_up_significant  < 3 | is.na(max_FC_up_significant)) {
-            max_FC_up_significant <- 3    
         }
-        results_volcano <- results_scatter %>% filter(!(diffexpressed == 'NO' & (log2FoldChange < min_FC_up_significant | log2FoldChange > max_FC_up_significant)))
-        final_number_of_genes <- nrow(results_volcano)
-        print(paste('Removed', initial_number_of_genes-final_number_of_genes, 'non-significant genes that would bias the plot visualization'))
-
-        # # Volcano Plot
-        volcano_plot_2 <- results_volcano |> 
-            #arrange(desc(padj)) |>
-            ggplot(aes(x=log2FoldChange, y=log10_pval, label=genes_to_label_first, col=diffexpressed)) +
-            geom_point(size=1.5) +
-            geom_text_repel(
-                size=label_size,
-                box.padding = 0.35,
-                show.legend = FALSE,
-                max.overlaps = max_overlaps,
-                max.time = 10,
-                max.iter = 10000000,
-                nudge_x = ifelse(results_scatter$diffexpressed == 'UP' | results_scatter$diffexpressed == 'INTEREST UP', 3 ,-3),
-                nudge_y = ifelse(results_scatter$diffexpressed == 'UP', 3, 3),
-                #nudge_x = (5),
-                aes(segment.size=0.3, segment.alpha=1, segment.curvature=0)) +
-            scale_colour_manual(values=my_colors)+
-            geom_vline(xintercept= FC_threshold, col="lavenderblush2", linetype=2, size=0.5) +
-            geom_vline(xintercept=-FC_threshold, col="lavenderblush2", linetype=2, size=0.5) +
-            geom_hline(yintercept=-1*log10(p_value_threshold), col="lavenderblush2", linetype=2, size=0.5)+
-            theme(text=element_text(size=20), legend.position="none")+
-            labs(title=paste('Pseudobulk DEGs in', str_replace(cluster,pattern = '_',replace = ' ') ),
-                        x=paste('Average log2 FC (', group2, '/', group1, ')', sep=''),
-                        y= 'Log10 Adj. p-value')+
-            # coord_cartesian(xlim=c(-1.15, 1.15), ylim = c(0, 95), expand = FALSE)+
-            theme_classic(base_size = 28, base_line_size=1) +
-            theme(legend.position="none", 
-                title = element_text(size=15),
-                axis.text= element_text(size=10),
-                axis.title= element_text(size=13),
-                )         +
-                scale_y_continuous(n.breaks = 8) +
-                scale_x_continuous(n.breaks = 8)
-        ggsave(plot=volcano_plot_2, paste0(figures_path, 'Pseudobulk volcano ',gene_list,' in ', cluster, ' ', group2, ' vs ', group1, '.pdf'))
-        print(volcano_plot_2)
- 
-    }}
-
-     return(c(all_count=DEG_count, UP_count=DEG_UP_count, DOWN_count=DEG_DOWN_count))
-   
-}                            
-## Wilcox DE analysis
-########## DEG_FindMarkers ##########
-
-DEG_FindMarkers <- function (scRNAseq, comparison, group1, group2, cluster='all_clusters', path='./', FC_threshold = 0.3, gene_lists_to_plot = NULL, p_value_threshold = 0.05) {
-
-    Idents(scRNAseq) <- comparison 
-    print(cluster)
-    print(group1)
-    print(group2)
+    }   
     
-    DEG_scRNAseq <- FindMarkers(object = scRNAseq, ident.1 = group1, ident.2 = group2)
-                                        #min.pct=0.005,
-                                        #logfc.threshold=FC_threshold)
+    return(c(all_count=DEG_count, UP_count=DEG_UP_count, DOWN_count=DEG_DOWN_count))    
+}                            
+
+# Wilcox DE analysis
+
+DEG_FindMarkers_RNA_assay <- function (scRNAseq, comparison, group1, group2, cluster='all_clusters', path='./', FC_threshold = 0.3, p_value_threshold = 0.05, max_overlaps = 15, label_size = 5, pathways_of_interest = NULL, label_threshold = 100000, distance_from_diagonal_threshold = 0.7, gene_lists_to_plot = NULL, expression_threshold_for_gene_list = 20, colors = c('green4', 'darkorchid4'), minimum_cell_number = 30, run_gProfiler2 = FALSE) {
+
+    # Set colors for the plot
+    my_colors <- c(colors, "gray")
+    names(my_colors) <- c("DOWN", "UP", "NO")
+    
+    # Set Paths
+    gene_lists_path <- here(path, 'gene_lists/')
+    local_figures_path <- here(path, 'figures/')
+    dir.create(gene_lists_path)
+    dir.create(local_figures_path)
+    print(paste('Cluster',cluster))
+
+    group1 <- fixed(group1)
+    group2 <- fixed(group2)
+
+    Idents(scRNAseq) <- comparison
+
+    print('number of cells in group 1')
+    print(scRNAseq@meta.data |> filter(str_detect( !!as.name(comparison) , group1 )) |> nrow())
+    print('number of cells in group 2')
+    print(scRNAseq@meta.data |> filter(str_detect( !!as.name(comparison) , group2 )) |> nrow())
+    
+    #Check there are enough cells
+    if ((scRNAseq@meta.data |> 
+            filter(str_detect( !!as.name(comparison) , group1 )) |> 
+            nrow()  < minimum_cell_number) | 
+            (scRNAseq@meta.data |> filter(str_detect( !!as.name(comparison) , group2 )) |> nrow()  < minimum_cell_number)) {
+        DEG_count <- 'Not enough cells'
+        DEG_UP_count <- 'Not enough cells'
+        DEG_DOWN_count <- 'Not enough cells'
+        return(c(all_count=DEG_count, UP_count=DEG_UP_count, DOWN_count=DEG_DOWN_count))
+    }
+
+    results <- FindMarkers(object = scRNAseq, ident.1 = group1, ident.2 = group2, assay = 'RNA', slot = 'data', test.use = 'wilcox')
 
     scRNAseq_CPM <- scRNAseq |> AggregateExpression(group.by=c(comparison),
                                         assays = 'RNA',
-                                        slot = 'data',
                                         return.seurat=TRUE,
                                         normalization.method='RC',
                                         scale.factor = 1e6)
 
-    counts_CPM <- scRNAseq_CPM |> GetAssayData(assay = 'RNA', slot = 'data') |>
+    counts_CPM <- scRNAseq_CPM |> GetAssayData(assay = 'RNA', layer = 'data') |>
                             as.data.frame() |>
                             rownames_to_column(var = 'gene') |>
                             mutate(
                                 !!paste0('Avg_', group2) := !!as.name(group2),
-                                !!paste0('Avg_', group1) := !!as.name(group1)
-                            )     
-    
-    DEG_scRNAseq <- DEG_scRNAseq %>% mutate(avg_log2FC = avg_log2FC*-1) 
+                                !!paste0('Avg_', group1) := !!as.name(group1),
+                            ) 
+ 
 
     #Add gene annotations:
-    annotations <- read.csv("M:/LPD-MIS members' data/Eduard Ansaldo/Bioinformatics/analysis_templates/annotations.csv")    
-    DEG_scRNAseq <- DEG_scRNAseq |>
+    annotations <- read.csv(here('scripts', 'annotations.csv'))    
+    results <- results |>
                     rownames_to_column('genes') |>
+                    rename(
+                                log2FoldChange = avg_log2FC,
+                                padj = p_val_adj,
+                                pvalue = p_val
+                            ) |>
+                            mutate(log2FoldChange = log2FoldChange*-1) |>
                     left_join(y= unique(annotations[,c('gene_name', 'description')]),
                         by = c('genes' = 'gene_name')) |>
                     left_join(y = counts_CPM, by = c('genes' = 'gene'))
+    results_filtered <- filter(results, padj < p_value_threshold) %>% arrange(padj)
+    results_filtered_UP <- filter(results_filtered, log2FoldChange >  FC_threshold) 
+    results_filtered_DOWN <- filter(results_filtered, log2FoldChange <  FC_threshold)
 
-    DEG_scRNAseq_filtered <- filter(DEG_scRNAseq, p_val_adj < 0.05) %>% arrange(p_val_adj)
-    DEG_scRNAseq_filtered_UP <- filter(DEG_scRNAseq_filtered, avg_log2FC >  0) 
-    DEG_scRNAseq_filtered_DOWN <- filter(DEG_scRNAseq_filtered, avg_log2FC <  0)
-
-    write.csv(DEG_scRNAseq_filtered, file= paste(paste(path, 'DEG', sep=''), 'FindMarkers', cluster, group1, 'vs', group2, '.csv', sep='_'))
-    write.csv(DEG_scRNAseq_filtered_UP, file=paste(paste(path, 'DEG_UP', sep=''), 'FindMarkers', cluster, group1, 'vs', group2, '.csv', sep='_'))
-    write.csv(DEG_scRNAseq_filtered_DOWN, file=paste(paste(path, 'DEG_DOWN', sep=''), 'FindMarkers', cluster, group1, 'vs', group2, '.csv', sep='_'))
+    # Write results to CSV files
+    write.csv(results_filtered |> arrange(padj), file=here(gene_lists_path, paste('ALL_GENES_DEG_Analysis', cluster, 'Wilcox', group2, 'vs', group1, '.csv', sep='_')))
+    write.csv(results_filtered_UP |> arrange(desc(log2FoldChange)), file=here(gene_lists_path, paste('DEG_UP_in', group2, cluster, 'Wilcox', group2, 'vs', group1, '.csv', sep='_')))
+    write.csv(results_filtered_DOWN |> arrange(log2FoldChange), file=here(gene_lists_path, paste('DEG_DOWN_in', group2, cluster, 'Wilcox', group2, 'vs', group1, '.csv', sep='_')))
 
     # Return number of DEGs:
-    DEG_count <- nrow(DEG_scRNAseq_filtered)
-    DEG_UP_count <- nrow(DEG_scRNAseq_filtered_UP)
-    DEG_DOWN_count <- nrow(DEG_scRNAseq_filtered_DOWN)
+    DEG_count <- nrow(results_filtered)
+    DEG_UP_count <- nrow(results_filtered_UP)
+    DEG_DOWN_count <- nrow(results_filtered_DOWN)
 
-    ## prepare for visualization
-    DEG_scRNAseq <- DEG_scRNAseq %>% mutate(
-                        log10_pval = log10(p_val_adj+10^-90)*-1,
-                        genes_to_label = ifelse((avg_log2FC >= 0.2 | avg_log2FC  <= -0.2)  & (p_val_adj < 0.05), genes,NA),
-                        diffexpressed = case_when(
-                                                avg_log2FC>=0.2 & p_val_adj < 0.05  ~ 'UP',
-                                                avg_log2FC<=-0.2 & p_val_adj < 0.05  ~ "DOWN",
-                                                TRUE ~ 'NO')) |>
-                        mutate(diffexpressed  =  factor(diffexpressed, levels = c('NO', 'DOWN', 'UP'))) |>
-                        arrange(diffexpressed)
+    # Generate scatter and volcano plots
+    results_scatter <- scatterplot(results = results, group1 = group1, group2 = group2, cluster = cluster, my_colors = my_colors, local_figures_path = local_figures_path, FC_threshold = FC_threshold, p_value_threshold = p_value_threshold, max_overlaps = max_overlaps, label_size = label_size, label_threshold = label_threshold, distance_from_diagonal_threshold = distance_from_diagonal_threshold, test_type = 'Wilcox')
+    volcano_plot(results_scatter, group1 = group1, group2 = group2, cluster = cluster, my_colors = my_colors, local_figures_path = local_figures_path, FC_threshold = FC_threshold, p_value_threshold = p_value_threshold, max_overlaps = max_overlaps, label_size = label_size, label_threshold = label_threshold, test_type ='Wilcox')
 
-    my_colors <- c("green4", "darkorchid4", "gray")    
-    names(my_colors) <- c("DOWN", "UP", "NO")
+    ########## Overrepresentation analysis ##########
+    if (run_gProfiler2) {
+        gProfiler2_functional_analysis(results,  cluster = cluster, comparison = comparison, path= path , FC_threshold = FC_threshold)
+        if (!is.null(pathways_of_interest)) {
+            pathways_of_interest_analysis(results = results, pathways_of_interest = pathways_of_interest,  cluster = cluster, path = path, group1 = group1, group2 = group2, comparison = comparison)
+        }
+    }
 
-    # Scatterplot
-    scatter_plot <- DEG_scRNAseq |> 
-        # arrange(desc(p_val_adj)) |>
-        ggplot(aes(x = !!sym(paste0('Avg_', group1)), y = !!sym(paste0('Avg_', group2)), label = genes_to_label, col = diffexpressed))+
-            geom_point(size=1.5
-            ) +
-            geom_abline(slope = 1, intercept = 0)+
-            geom_text_repel(
-            size=5.5,
-            box.padding = 0.7,
-            show.legend = FALSE,
-            max.overlaps = 6,
-            aes(segment.size=0.5, segment.alpha=0.5, segment.curvature=0)) +
-        scale_colour_manual(values=my_colors)+
-        #  geom_vline(xintercept=0.2, col="lavenderblush2", linetype=2, size=0.5) +
-        #  geom_vline(xintercept=-0.2, col="lavenderblush2", linetype=2, size=0.5) +
-        #  geom_hline(yintercept=-1*log10(0.05), col="lavenderblush2", linetype=2, size=0.5)+
-        theme(text=element_text(size=20), legend.position="none")+
-        labs(title=paste('FindMarkers DEGs in', cluster ),
-                    x=paste0('Average CPM in ', group1),
-                    y=paste0('Average CPM in ',  group2),
-        # coord_cartesian(xlim=c(-1.15, 1.15), ylim = c(0, 95), expand = FALSE)+
-        theme_classic(base_size = 28, base_line_size=1) +
-        theme(legend.position="none", 
-            title = element_text(size=20),
-            axis.text= element_text(size=13),
-            axis.title= element_text(size=15)))+
-        scale_y_continuous(trans = 'log10')+
-        scale_x_continuous(trans = 'log10')
-
-    ggsave(scatter_plot, paste0(path, 'FindMarkers scatter DEG in ', cluster, '.pdf'))
-    print(scatter_plot)
-
-
-    #Filter values which are not significant but with high  FC that would bias the plot visualization
-    initial_number_of_genes <- nrow(DEG_scRNAseq)
-    max_FC_up_significant <- DEG_scRNAseq %>% filter(diffexpressed != 'NO') %>% dplyr::select(avg_log2FC) %>% max()
-    min_FC_up_significant <- DEG_scRNAseq %>% filter(diffexpressed != 'NO') %>% dplyr::select(avg_log2FC) %>% min()
-    DEG_scRNAseq <- DEG_scRNAseq %>% filter(!(diffexpressed == 'NO' & (avg_log2FC <= min_FC_up_significant | avg_log2FC >= max_FC_up_significant)))
-    final_number_of_genes <- nrow(DEG_scRNAseq)
-    
-    print(paste('Removed', initial_number_of_genes-final_number_of_genes, 'non-significant genes that would bias the plot visualization'))
-    
-    #Volcano Plot
-    volcano_plot <- ggplot(DEG_scRNAseq, aes(x=avg_log2FC, y=log10_pval, label=genes_to_label, col=diffexpressed)) +
-    geom_point(size=1.5) +
-    geom_text_repel(
-        size=5.3,
-        box.padding = 1,
-        show.legend = FALSE,
-        max.overlaps = 10,
-        aes(segment.size=0.4, segment.alpha=0.3, segment.curvature=0)) +
-    scale_colour_manual(values=my_colors)+
-    geom_vline(xintercept=0.2, col="lavenderblush2", linetype=2, size=0.5) +
-    geom_vline(xintercept=-0.2, col="lavenderblush2", linetype=2, size=0.5) +
-    geom_hline(yintercept=-1*log10(p_value_threshold), col="lavenderblush2", linetype=2, size=0.5)+
-    theme(text=element_text(size=20), legend.position="none")+
-    labs(title=paste('FindMarkers DEGs in', cluster ),
-                x=paste('Average log2 FC (', group2, '/', group1, ')', sep=''),
-                y= 'Log10 Adj. p-value')+
-    # coord_cartesian(xlim=c(-1.15, 1.15), ylim = c(0, 95), expand = FALSE)+
-    theme_classic(base_size = 28, base_line_size=1) +
-    theme(legend.position="none", 
-          title = element_text(size=20),
-          axis.text= element_text(size=13),
-          axis.title= element_text(size=15),
-        )
-    ggsave(volcano_plot, paste(path, 'FindMarkers Differential gene expression in', cluster, '.pdf'))
-    print(volcano_plot)
-
-
-    
-########## Plotting individual genes of interest ##########
+    ########## Plotting individual genes of interest ##########
     if (!is.null(gene_lists_to_plot)) {
         for (gene_list in names(gene_lists_to_plot)) {
-            genes_to_plot <- gene_lists_to_plot[[gene_list]]
-            
+            genes_to_plot <- gene_lists_to_plot[[gene_list]]                    
             print(genes_to_plot)
-            
-        
-        DEG_scRNAseq <- DEG_scRNAseq |> mutate(
-                            genes_to_label = ifelse(genes %in% genes_to_plot, genes, NA),
-                            diffexpressed = case_when(
-                                avg_log2FC>=FC_threshold & p_val_adj < p_value_threshold & !(genes %in% genes_to_plot) ~ 'UP', 
-                                avg_log2FC<=-1*FC_threshold & p_val_adj < p_value_threshold & !(genes %in% genes_to_plot)  ~ "DOWN",
-                                genes %in% genes_to_plot & avg_log2FC >= 0 & p_val_adj < p_value_threshold ~ 'INTEREST UP',
-                                genes %in% genes_to_plot & avg_log2FC < 0 & p_val_adj < p_value_threshold ~ 'INTEREST DOWN',
-                                TRUE ~ 'NO'))  |>
-                        mutate(diffexpressed = factor(diffexpressed, levels = c('NO', 'DOWN', 'UP', 'INTEREST DOWN', 'INTEREST UP'))) |>
-                        arrange(diffexpressed)          
-        
-        my_colors <- c("green4", "darkorchid4", "gray", 'green3', 'darkorchid3')
-        names(my_colors) <- c("DOWN", "UP", "NO", 'INTEREST DOWN', 'INTEREST UP')
+            # Generate scatter and volcano plots
+            results_scatter <- scatterplot(genes_to_plot = genes_to_plot, gene_list_name = gene_list, results = results, group1 = group1, group2 = group2, cluster = cluster, my_colors = my_colors, local_figures_path = local_figures_path, FC_threshold = FC_threshold, p_value_threshold = p_value_threshold, max_overlaps = 15, label_size = label_size, label_threshold = label_threshold, distance_from_diagonal_threshold = distance_from_diagonal_threshold, test_type = 'Wilcox')
+            volcano_plot(genes_to_plot = genes_to_plot, gene_list_name = gene_list, results_scatter = results_scatter, group1 = group1, group2 = group2, cluster = cluster, my_colors = my_colors, local_figures_path = local_figures_path, FC_threshold = FC_threshold, p_value_threshold = p_value_threshold, max_overlaps = 15, label_size = label_size, label_threshold = label_threshold, test_type = 'Wilcox')
 
-        #print(head(DEG_scRNAseq |> filter(diffexpressed != 'NO') |> arrange(desc(distance_from_diagonal)) |> pull(distance_from_diagonal), n = 11))
-
-        #ggplot(results, aes(x= !!paste0('Avg_', group1), y = !!paste0('Avg_', group2), label = genes_to_label, col = diffexpressed))+
-
-        
-        # Scatterplot
-
-        limx <- DEG_scRNAseq |> pull(paste0('Avg_', group1)) |> max()
-        limy <- DEG_scRNAseq |> pull(paste0('Avg_', group2)) |> max()
-        mylims <- max(limx, limy)*6
-        
-        scatter_plot_too <- DEG_scRNAseq |> 
-             ggplot(aes(x = !!sym(paste0('Avg_', group1)), y = !!sym(paste0('Avg_', group2)), label = genes_to_label, col = diffexpressed))+
-                geom_point(size=1.3
-                ) +
-                geom_abline(slope = 1, intercept = 0)+
-                geom_text_repel(
-                    #size=label_size,
-                    box.padding = 0.35,
-                    show.legend = FALSE,
-                    max.overlaps = Inf,
-                    max.time = 10,
-                    max.iter = 10000000,
-                    nudge_x = ifelse(DEG_scRNAseq$diffexpressed == 'UP' | DEG_scRNAseq$diffexpressed == 'INTEREST UP', -1, 1),
-                    nudge_y = ifelse(DEG_scRNAseq$diffexpressed == 'UP' | DEG_scRNAseq$diffexpressed == 'INTEREST UP', 0.75, -0.75),
-                    aes(label = genes_to_label,segment.size=0.5, segment.alpha=1, segment.curvature=0)) +
-            
-            scale_colour_manual(values=my_colors)+
-            theme(text=element_text(size=20), legend.position="none")+
-            labs(title=paste('Pseudobulk DEGs in', str_replace(cluster,pattern = '_',replace = ' ') ),
-                        x=paste0('Average Normalized Counts in ', group1),
-                        y=paste0('Average Normalized Counts in ',  group2))+
-            theme_classic(base_size = 28, base_line_size=1) +
-            theme(legend.position="none", 
-                title = element_text(size=11),
-                axis.text= element_text(size=10),
-                axis.title= element_text(size=13))+
-        scale_x_log10(limits =  c(0.5, mylims))+
-        scale_y_log10(limits =  c(0.5, mylims))
-
-        ggsave(scatter_plot_too, paste0(path, 'Scatter ',gene_list,' in ', cluster, ' ', group2, ' vs ', group1, '.pdf'))
-        print(scatter_plot_too)
-
-
-        #Filter values which are not significant but with high  FC that would bias the plot visualization
-        initial_number_of_genes <- nrow(DEG_scRNAseq)
-        max_FC_up_significant <- DEG_scRNAseq %>% filter(diffexpressed != 'NO') %>% dplyr::select(avg_log2FC) %>% max(na.rm = T)
-        min_FC_up_significant <- DEG_scRNAseq %>% filter(diffexpressed != 'NO') %>% dplyr::select(avg_log2FC) %>% min(na.rm = T)
-        if (min_FC_up_significant > -3 | is.na(min_FC_up_significant)) {
-            min_FC_up_significant <- -3
-        }  
-        if (max_FC_up_significant  < 3 | is.na(max_FC_up_significant)) {
-            max_FC_up_significant <- 3    
         }
-        results_volcano <- DEG_scRNAseq %>% filter(!(diffexpressed == 'NO' & (avg_log2FC < min_FC_up_significant | avg_log2FC > max_FC_up_significant)))
-        final_number_of_genes <- nrow(results_volcano)
-        print(paste('Removed', initial_number_of_genes-final_number_of_genes, 'non-significant genes that would bias the plot visualization'))
-
-        # # Volcano Plot
-        volcano_plot_two <- results_volcano |> 
-            #arrange(desc(p_val_adj)) |>
-            ggplot(aes(x=avg_log2FC, y=log10_pval, label=genes_to_label, col=diffexpressed)) +
-            geom_point(size=1.5) +
-            geom_text_repel(
-                #size=label_size,
-                box.padding = 0.35,
-                show.legend = FALSE,
-                max.overlaps = Inf,
-                max.time = 10,
-                max.iter = 10000000,
-                nudge_x = ifelse(DEG_scRNAseq$diffexpressed == 'UP' | DEG_scRNAseq$diffexpressed == 'INTEREST UP', 1 ,-1),
-                nudge_y = ifelse(DEG_scRNAseq$diffexpressed == 'UP', 1, 1),
-                #nudge_x = (5),
-                aes(segment.size=0.3, segment.alpha=1, segment.curvature=0)) +
-            scale_colour_manual(values=my_colors)+
-            geom_vline(xintercept= FC_threshold, col="lavenderblush2", linetype=2, size=0.5) +
-            geom_vline(xintercept=-FC_threshold, col="lavenderblush2", linetype=2, size=0.5) +
-            geom_hline(yintercept=-1*log10(p_value_threshold), col="lavenderblush2", linetype=2, size=0.5)+
-            theme(text=element_text(size=20), legend.position="none")+
-            labs(title=paste('Pseudobulk DEGs in', str_replace(cluster,pattern = '_',replace = ' ') ),
-                        x=paste('Average log2 FC (', group2, '/', group1, ')', sep=''),
-                        y= 'Log10 Adj. p-value')+
-            # coord_cartesian(xlim=c(-1.15, 1.15), ylim = c(0, 95), expand = FALSE)+
-            theme_classic(base_size = 28, base_line_size=1) +
-            theme(legend.position="none", 
-                title = element_text(size=15),
-                axis.text= element_text(size=10),
-                axis.title= element_text(size=13),
-                )         +
-                scale_y_continuous(n.breaks = 8) +
-                scale_x_continuous(n.breaks = 8)
-        ggsave(volcano_plot_two, paste0(path, 'Volcano ',gene_list,' in ', cluster, ' ', group2, ' vs ', group1, '.pdf'))
-        print(volcano_plot_two)
- 
-    }}
-                           
+    }    
 
     return(c(all_count=DEG_count, UP_count=DEG_UP_count, DOWN_count=DEG_DOWN_count))
 }
-# Bulk functions
-bulk_analysis <- function (counts_table, comparison = 'Groups', group1, group2, cell_type, path='./', FC_threshold = 0.3, p_value_threshold = 0.05, max_overlaps = 15, label_size = 5, pathways_of_interest = NULL, label_threshold = 100000, distance_from_diagonal_threshold =0.4, gene_lists_to_plot = NULL, expression_threshold_for_gene_list = 20, colors = c('green4', 'darkorchid4')) {
 
-   my_colors <- c(colors, "gray")
+DEG_FindMarkers_SCT_assay <- function (scRNAseq, comparison, group1, group2, is_integrated_subset = FALSE, cluster='all_clusters', path='./', FC_threshold = 0.3, p_value_threshold = 0.05, max_overlaps = 15, label_size = 5, pathways_of_interest = NULL, label_threshold = 100000, distance_from_diagonal_threshold = 0.7, gene_lists_to_plot = NULL, expression_threshold_for_gene_list = 20, colors = c('green4', 'darkorchid4'), minimum_cell_number = 30, run_gProfiler2 = FALSE) {
+
+    # Set colors for the plot
+    my_colors <- c(colors, "gray")
     names(my_colors) <- c("DOWN", "UP", "NO")
-
-    gene_lists_path <- paste0(path, 'gene_lists/')
-    figures_path <- paste0(path, 'figures/')
-
-    # unlink(gene_lists_path, recursive = T)
-    # unlink(figures_path, recursive = T)
+    
+    # Set Paths
+    gene_lists_path <- here(path, 'gene_lists/')
+    local_figures_path <- here(path, 'figures/')
     dir.create(gene_lists_path)
-    dir.create(figures_path)
-    print(paste(cell_type))
+    dir.create(local_figures_path)
+    print(paste('Cluster',cluster))
 
+    group1 <- fixed(group1)
+    group2 <- fixed(group2)
+
+    Idents(scRNAseq) <- comparison
+
+    print('number of cells in group 1')
+    print(scRNAseq@meta.data |> filter(str_detect( !!as.name(comparison) , group1 )) |> nrow())
+    print('number of cells in group 2')
+    print(scRNAseq@meta.data |> filter(str_detect( !!as.name(comparison) , group2 )) |> nrow())
+    
+    #Check there are enough cells
+    if ((scRNAseq@meta.data |> 
+            filter(str_detect( !!as.name(comparison) , group1 )) |> 
+            nrow()  < minimum_cell_number) | 
+            (scRNAseq@meta.data |> filter(str_detect( !!as.name(comparison) , group2 )) |> nrow()  < minimum_cell_number)) {
+        DEG_count <- 'Not enough cells'
+        DEG_UP_count <- 'Not enough cells'
+        DEG_DOWN_count <- 'Not enough cells'
+        return(c(all_count=DEG_count, UP_count=DEG_UP_count, DOWN_count=DEG_DOWN_count))
+    }
+
+    results <- FindMarkers(object = scRNAseq, ident.1 = group1, ident.2 = group2, assay = 'SCT', slot = 'data', test.use = 'wilcox', recorrect_umi = !is_integrated_subset)
+
+    scRNAseq_CPM <- scRNAseq |> AggregateExpression(group.by=c(comparison),
+                                        assays = 'SCT',
+                                        slot = 'counts')
+ 
+    # Calculating CPMs    
+    counts_CPM <- scRNAseq_CPM$SCT |> 
+                            as.data.frame() |>
+                            mutate(across(where(is.numeric), ~ .x / sum(.x) * 1e6)) |> 
+                            rownames_to_column(var = 'gene') |>
+                            mutate(  
+                                !!paste0('Avg_', group2) := !!as.name(group2),# it
+                                !!paste0('Avg_', group1) := !!as.name(group1)
+                            )
+
+
+    #Add gene annotations:
+    annotations <- read.csv(here('scripts', 'annotations.csv'))    
+    results <- results |>
+                    rownames_to_column('genes') |>
+                    rename(
+                                log2FoldChange = avg_log2FC,
+                                padj = p_val_adj,
+                                pvalue = p_val
+                            ) |>
+                            mutate(log2FoldChange = log2FoldChange*-1) |>
+                    left_join(y= unique(annotations[,c('gene_name', 'description')]),
+                        by = c('genes' = 'gene_name')) |>
+                    left_join(y = counts_CPM, by = c('genes' = 'gene'))
+    results_filtered <- filter(results, padj < p_value_threshold) %>% arrange(padj)
+    results_filtered_UP <- filter(results_filtered, log2FoldChange >  FC_threshold) 
+    results_filtered_DOWN <- filter(results_filtered, log2FoldChange <  FC_threshold)
+
+    # Write results to CSV files
+    write.csv(results_filtered |> arrange(padj), file=here(gene_lists_path, paste('ALL_GENES_DEG_Analysis', cluster, 'Wilcox', group2, 'vs', group1, '.csv', sep='_')))
+    write.csv(results_filtered_UP |> arrange(desc(log2FoldChange)), file=here(gene_lists_path, paste('DEG_UP_in', group2, cluster, 'Wilcox', group2, 'vs', group1, '.csv', sep='_')))
+    write.csv(results_filtered_DOWN |> arrange(log2FoldChange), file=here(gene_lists_path, paste('DEG_DOWN_in', group2, cluster, 'Wilcox', group2, 'vs', group1, '.csv', sep='_')))
+
+    # Return number of DEGs:
+    DEG_count <- nrow(results_filtered)
+    DEG_UP_count <- nrow(results_filtered_UP)
+    DEG_DOWN_count <- nrow(results_filtered_DOWN)
+
+    # Generate scatter and volcano plots
+    results_scatter <- scatterplot(results = results, group1 = group1, group2 = group2, cluster = cluster, my_colors = my_colors, local_figures_path = local_figures_path, FC_threshold = FC_threshold, p_value_threshold = p_value_threshold, max_overlaps = max_overlaps, label_size = label_size, label_threshold = label_threshold, distance_from_diagonal_threshold = distance_from_diagonal_threshold, test_type = 'Wilcox')
+    volcano_plot(results_scatter, group1 = group1, group2 = group2, cluster = cluster, my_colors = my_colors, local_figures_path = local_figures_path, FC_threshold = FC_threshold, p_value_threshold = p_value_threshold, max_overlaps = max_overlaps, label_size = label_size, label_threshold = label_threshold, test_type ='Wilcox')
+
+    ########## Overrepresentation analysis ##########
+    if (run_gProfiler2) {
+        gProfiler2_functional_analysis(results,  cluster = cluster, comparison = comparison, path= path , FC_threshold = FC_threshold)
+        if (!is.null(pathways_of_interest)) {
+            pathways_of_interest_analysis(results = results, pathways_of_interest = pathways_of_interest,  cluster = cluster, path = path, group1 = group1, group2 = group2, comparison = comparison)
+        }
+    }
+
+    ########## Plotting individual genes of interest ##########
+    if (!is.null(gene_lists_to_plot)) {
+        for (gene_list in names(gene_lists_to_plot)) {
+            genes_to_plot <- gene_lists_to_plot[[gene_list]]                    
+            print(genes_to_plot)
+            # Generate scatter and volcano plots
+            results_scatter <- scatterplot(genes_to_plot = genes_to_plot, gene_list_name = gene_list, results = results, group1 = group1, group2 = group2, cluster = cluster, my_colors = my_colors, local_figures_path = local_figures_path, FC_threshold = FC_threshold, p_value_threshold = p_value_threshold, max_overlaps = 15, label_size = label_size, label_threshold = label_threshold, distance_from_diagonal_threshold = distance_from_diagonal_threshold, test_type = 'Wilcox')
+            volcano_plot(genes_to_plot = genes_to_plot, gene_list_name = gene_list, results_scatter = results_scatter, group1 = group1, group2 = group2, cluster = cluster, my_colors = my_colors, local_figures_path = local_figures_path, FC_threshold = FC_threshold, p_value_threshold = p_value_threshold, max_overlaps = 15, label_size = label_size, label_threshold = label_threshold, test_type = 'Wilcox')
+
+        }
+    }    
+
+    return(c(all_count=DEG_count, UP_count=DEG_UP_count, DOWN_count=DEG_DOWN_count))
+}
+
+
+# Bulk functions
+
+bulk_analysis <- function (counts_table, comparison = 'Groups', group1, group2, cluster='', path='./', FC_threshold = 0.3, p_value_threshold = 0.05, max_overlaps = 15, label_size = 5, pathways_of_interest = NULL, label_threshold = 100000, distance_from_diagonal_threshold = 0.4, gene_lists_to_plot = NULL, expression_threshold_for_gene_list = 20, colors = c('green4', 'darkorchid4'), minimum_cell_number = 10, run_gProfiler2 = FALSE) {
+
+    # Set colors for the plot
+    my_colors <- c(colors, "gray")
+    names(my_colors) <- c("DOWN", "UP", "NO")
+    
+    # Set Paths
+    gene_lists_path <- here(path, 'gene_lists/')
+    local_figures_path <- here(path, 'figures/')
+    dir.create(gene_lists_path)
+    dir.create(local_figures_path)
+    print(paste('Cluster',cluster))
+
+    group1 <- fixed(group1)
+    group2 <- fixed(group2)
+  
     counts <- tibble(counts_table) |> column_to_rownames('genes')
 
     # Run DE Analysis
@@ -1319,7 +697,7 @@ bulk_analysis <- function (counts_table, comparison = 'Groups', group1, group2, 
                 mutate(condition = ifelse(grepl(group1, samples), group1, group2))
     
     ## Filter
-   counts <- counts |> mutate(row_sums=rowSums(counts)) |> filter(row_sums >= 10) |> dplyr::select(-row_sums)
+    counts <- counts |> mutate(row_sums=rowSums(counts)) |> filter(row_sums >= 10) |> dplyr::select(-row_sums)
     
     print('Group 1 Length')
     print(nrow(colData |> filter(condition == group1)))
@@ -1335,20 +713,17 @@ bulk_analysis <- function (counts_table, comparison = 'Groups', group1, group2, 
     }
     
     #Create DESeq2 object
-    
     dds <- DESeqDataSetFromMatrix(countData = counts,
-                            colData = colData,
-                            design = ~condition)
-
-    dds$condition <- factor(dds$condition, levels = c(group1, group2))
-
-    
+        colData = colData,
+        design = ~condition)
+    dds$condition <- factor(dds$condition, levels = c(group1, group2))    
 
     ## DESeq2 QC
     rld <- rlog(dds, blind=TRUE) #rlog normalization
-
     DESeq2::plotPCA(rld, ntop=500, intgroup='condition') #PCA
-    ggsave(filename=paste0('Pseudobulk_PCA_', cell_type, '.pdf'), path=figures_path) 
+    ggsave(filename=paste0('Bulk_PCA_', cluster, '.pdf'), path=local_figures_path) 
+    PCA_table <- DESeq2::plotPCA(rld, ntop=500, intgroup='condition', returnData = T) #PCA table
+    write.csv(PCA_table, file=paste(path, 'PCA_bulk', cluster, group2, 'vs', group1, '.csv', sep='_'))
 
     #################### Run DESeq2
     dds <- DESeq(dds)
@@ -1362,304 +737,335 @@ bulk_analysis <- function (counts_table, comparison = 'Groups', group1, group2, 
     #Get Normalized Counts
     normalized_counts <- counts(dds, normalized = T)
     normalized_counts <- normalized_counts |>
-            as.data.frame() |>
-            rownames_to_column('genes') |>
-            as_tibble() |>
-            rowwise() |>
-            mutate(
-                !!paste0('Avg_', group2) := mean(c_across(contains(group2))),
-                !!paste0('Avg_', group1) := mean(c_across(contains(group1))),
-            ) |>
-            ungroup()
+        as.data.frame() |>
+        rownames_to_column('genes') |>
+        as_tibble() |>
+        rowwise() |>
+        mutate(
+            !!paste0('Avg_', group2) := mean(c_across(contains(group2))),
+            !!paste0('Avg_', group1) := mean(c_across(contains(group1))),
+        ) |>
+        ungroup()
 
     #Add gene annotations:
-    annotations <- read.csv("M:/LPD-MIS members' data/Eduard Ansaldo/Bioinformatics/analysis_templates/annotations.csv")
+    annotations <- read.csv(here('scripts', 'annotations.csv'))
     results <- results |>
                     rownames_to_column('genes') |>
                     left_join(y= unique(annotations[,c('gene_name', 'description')]),
                         by = c('genes' = 'gene_name')) |>
                     left_join(y = normalized_counts, by = c('genes' = 'genes'))
 
-    head(results)
-
-    results_filtered <- filter(results, padj < p_value_threshold & ((!!sym(paste0('Avg_', group2)) > expression_threshold_for_gene_list) | !!sym(paste0('Avg_', group1)) > expression_threshold_for_gene_list) & (log2FoldChange >= FC_threshold | log2FoldChange  <= -1*FC_threshold)) %>% arrange(padj)
+    # Filter results 
+    results_filtered <- filter(
+        results,
+        padj < p_value_threshold &
+            ((!!sym(paste0('Avg_', group2)) > expression_threshold_for_gene_list) |
+                (!!sym(paste0('Avg_', group1)) > expression_threshold_for_gene_list)
+            ) &(log2FoldChange >= FC_threshold |
+                log2FoldChange <= -1 * FC_threshold)) |> 
+        arrange(padj)
     results_filtered_UP <- filter(results_filtered, log2FoldChange >  FC_threshold) 
     results_filtered_DOWN <- filter(results_filtered, log2FoldChange <  FC_threshold)
 
-
-
-    write.csv(results |> arrange(desc(padj)), file= paste(paste(gene_lists_path, 'ALL_GENES_DEG_Analysis', sep=''), 'pseudobulk', cell_type, group2, 'vs', group1, '.csv', sep='_'))
-    write.csv(results_filtered_UP, file=paste(paste(gene_lists_path, 'DEG_UP', sep=''), 'pseudobulk', cell_type, group2, 'vs', group1, '.csv', sep='_'))
-    write.csv(results_filtered_DOWN, file=paste(paste(gene_lists_path, 'DEG_DOWN', sep=''), 'pseudobulk', cell_type, group2, 'vs', group1, '.csv', sep='_'))
-
-        
+    # Write results to CSV files
+    write.csv(results |> arrange(padj), file= here(gene_lists_path, paste('ALL_GENES_DEG_Analysis', cluster, 'bulk', group2, 'vs', group1, '.csv', sep='_')))
+    write.csv(results_filtered_UP |> arrange(desc(log2FoldChange)), file=here(gene_lists_path, paste('DEG_UP_in', group2, cluster, 'bulk', group2, 'vs', group1, '.csv', sep='_')))
+    write.csv(results_filtered_DOWN |> arrange(log2FoldChange), file=here(gene_lists_path, paste('DEG_DOWN_in', group2, cluster, 'bulk', group2, 'vs', group1, '.csv', sep='_')))
 
     # Return number of DEGs:
     DEG_count <- nrow(results_filtered)
     DEG_UP_count <- nrow(results_filtered_UP)
     DEG_DOWN_count <- nrow(results_filtered_DOWN)
 
+    # Generate scatter and volcano plots
+    results_scatter <- scatterplot(results, group1, group2, cluster, my_colors, local_figures_path, FC_threshold, p_value_threshold, max_overlaps = 15, label_size, label_threshold, distance_from_diagonal_threshold, test_type = 'Bulk')
+    volcano_plot(results_scatter, group1, group2, cluster, my_colors, local_figures_path, FC_threshold, p_value_threshold, max_overlaps = 15, label_size, label_threshold, test_type ='Bulk')
 
-    ## prepare for visualization
-    results_scatter <- results %>% 
-                    drop_na(pvalue) |>
-                    mutate(
-                        log10_pval = log10(padj)*-1,
-                        distance_from_diagonal =  (abs((log10(!!sym(paste0('Avg_', group2))+1)) - (log10(!!sym(paste0('Avg_', group1))+1)))/sqrt(2)) ,
-                        #bottom_limit = (!!sym(paste0('Avg_', group1))-x_intercept^2)/!!sym(paste0('Avg_', group1)),
-                        #top_limit = bottom_limitp
-                         )
-                        
-    results_scatter <- results_scatter |> mutate(
-                        genes_to_label_first = ifelse((log2FoldChange >= FC_threshold | log2FoldChange  <= -1*FC_threshold)  & (padj < p_value_threshold) & (distance_from_diagonal > distance_from_diagonal_threshold) & ((!!sym(paste0('Avg_', group2)) > 100) | !!sym(paste0('Avg_', group1)) > 100), genes,NA),
-                        genes_to_label_second  = ifelse((log2FoldChange >= FC_threshold | log2FoldChange  <= -1*FC_threshold)  & (padj < p_value_threshold) & ((!!sym(paste0('Avg_', group2)) > label_threshold) | !!sym(paste0('Avg_', group1)) > label_threshold) & is.na(genes_to_label_first), genes,NA),
-                        genes_to_label = ifelse((log2FoldChange >= FC_threshold | log2FoldChange  <= -1*FC_threshold)  & (padj < p_value_threshold) & is.na(genes_to_label_first) & is.na(genes_to_label_second), genes,NA),
-                        genes_to_label_volcano = ifelse((log2FoldChange >= FC_threshold | log2FoldChange  <= -1*FC_threshold)  & (padj < p_value_threshold), genes,NA),
-                        diffexpressed = case_when(
-                            log2FoldChange>=FC_threshold & padj < p_value_threshold  ~ 'UP', 
-                            log2FoldChange<=-1*FC_threshold & padj < p_value_threshold  ~ "DOWN",
-                            TRUE ~ 'NO'))  |>
-                    mutate(diffexpressed = factor(diffexpressed, levels = c('NO', 'DOWN', 'UP'))) |>
-                    arrange(diffexpressed)          
-    
-
-    print(head(results_scatter |> filter(diffexpressed != 'NO') |> arrange(desc(distance_from_diagonal)) |> pull(distance_from_diagonal), n = 11))
-
-    #ggplot(results, aes(x= !!paste0('Avg_', group1), y = !!paste0('Avg_', group2), label = genes_to_label, col = diffexpressed))+
-
-    
-    # Scatterplot
-
-    limx <- results_scatter |> pull(paste0('Avg_', group1)) |> max()
-    limy <- results_scatter |> pull(paste0('Avg_', group2)) |> max()
-    mylims <- max(limx, limy)*6
-       
-    scatterplot <- results_scatter |> 
-        ggplot(aes(x = !!sym(paste0('Avg_', group1)), y = !!sym(paste0('Avg_', group2)), col = diffexpressed))+
-            geom_point(size=1.3
-            ) +
-            geom_abline(slope = 1, intercept = 0)+
-            geom_text_repel(
-                size=label_size,
-                box.padding = 0.35,
-                show.legend = FALSE,
-                max.overlaps = 30,
-                max.time = 10,
-                max.iter = 10000000,
-                nudge_x = ifelse(results_scatter$diffexpressed == 'UP', -1, 1),
-                nudge_y = ifelse(results_scatter$diffexpressed == 'UP', 0.75, -0.75),
-                aes(label = genes_to_label_first,segment.size=0.3, segment.alpha=0.4, segment.curvature=0)) +
-            geom_text_repel(
-                size=label_size,
-                box.padding = 0.35,
-                show.legend = FALSE,
-                max.overlaps = 10,
-                max.time = 10,
-                max.iter = 10000000,
-                nudge_x = ifelse(results_scatter$diffexpressed == 'UP', -1, 1),
-                nudge_y = ifelse(results_scatter$diffexpressed == 'UP', 0.75, -0.75),
-                aes(label = genes_to_label_second, segment.size=0.3, segment.alpha=0.4, segment.curvature=0)) +
-            geom_text_repel(
-                size=label_size,
-                box.padding = 0.35,
-                show.legend = FALSE,
-                max.overlaps = 10,
-                max.time = 10,
-                max.iter = 10000000,
-                nudge_x = ifelse(results_scatter$diffexpressed == 'UP', -1, 1),
-                nudge_y = ifelse(results_scatter$diffexpressed == 'UP', 0.75, -0.75),
-                aes(label = genes_to_label, segment.size=0.3, segment.alpha=0.4, segment.curvature=0)) +
-        scale_colour_manual(values=my_colors)+
-        theme(text=element_text(size=20), legend.position="none")+
-        labs(title=paste('Pseudobulk DEGs in', str_replace(cell_type,pattern = '_',replace = ' ') ),
-                    x=paste0('Average Normalized Counts in ', group1),
-                    y=paste0('Average Normalized Counts in ',  group2))+
-        theme_classic(base_size = 28, base_line_size=1) +
-        theme(legend.position="none", 
-            title = element_text(size=11),
-            axis.text= element_text(size=10),
-            axis.title= element_text(size=13))+
-       scale_x_log10(limits =  c(0.5, mylims))+
-       scale_y_log10(limits =  c(0.5, mylims))
-
-    ggsave(scatterplot, paste0(figures_path, 'Scatter DEG in ', cell_type, '.pdf'))
-    print(scatterplot)
-
-
-    #Filter values which are not significant but with high  FC that would bias the plot visualization
-    initial_number_of_genes <- nrow(results_scatter)
-    max_FC_up_significant <- results_scatter %>% filter(diffexpressed != 'NO') %>% dplyr::select(log2FoldChange) %>% max(na.rm = T)
-    min_FC_up_significant <- results_scatter %>% filter(diffexpressed != 'NO') %>% dplyr::select(log2FoldChange) %>% min(na.rm = T)
-    if (min_FC_up_significant > -3 | is.na(min_FC_up_significant)) {
-        min_FC_up_significant <- -3
-    }  
-    if (max_FC_up_significant  < 3 | is.na(max_FC_up_significant)) {
-        max_FC_up_significant <- 3    
-    }
-    results_volcano <- results_scatter %>% filter(!(diffexpressed == 'NO' & (log2FoldChange < min_FC_up_significant | log2FoldChange > max_FC_up_significant)))
-    final_number_of_genes <- nrow(results_volcano)
-    print(paste('Removed', initial_number_of_genes-final_number_of_genes, 'non-significant genes that would bias the plot visualization'))
-
-    # # Volcano Plot
-    volcano_plot <- results_volcano |> 
-        arrange(desc(padj)) |>
-        ggplot(aes(x=log2FoldChange, y=log10_pval, label=genes_to_label_volcano, col=diffexpressed)) +
-        geom_point(size=1.5) +
-        geom_text_repel(
-            size=label_size,
-            box.padding = 0.35,
-            show.legend = FALSE,
-            max.overlaps = max_overlaps,
-            max.time = 10,
-            max.iter = 10000000,
-            aes(segment.size=0.5, segment.alpha=0.8, segment.curvature=0)) +
-        scale_colour_manual(values=my_colors)+
-        geom_vline(xintercept=FC_threshold, col="lavenderblush2", linetype=2, size=0.5) +
-        geom_vline(xintercept=-FC_threshold, col="lavenderblush2", linetype=2, size=0.5) +
-        geom_hline(yintercept=-1*log10(p_value_threshold), col="lavenderblush2", linetype=2, size=0.5)+
-        theme(text=element_text(size=20), legend.position="none")+
-        labs(title=paste('Pseudobulk DEGs in', str_replace(cell_type,pattern = '_',replace = ' ') ),
-                    x=paste('Average log2 FC (', group2, '/', group1, ')', sep=''),
-                    y= 'Log10 Adj. p-value')+
-        # coord_cartesian(xlim=c(-1.15, 1.15), ylim = c(0, 95), expand = FALSE)+
-        theme_classic(base_size = 28, base_line_size=1) +
-        theme(legend.position="none", 
-            title = element_text(size=15),
-            axis.text= element_text(size=10),
-            axis.title= element_text(size=13),
-            )         +
-            scale_y_continuous(n.breaks = 8) +
-            scale_x_continuous(n.breaks = 8)
-    ggsave(volcano_plot, paste0(figures_path, 'Volcano DEG in ', cell_type, '.pdf'))
-    print(volcano_plot)
-
-########## Overrepresentation analysis ##########
-
-gProfiler2_functional_analysis(results, cluster =cell_type, comparison = comparison, path= path , FC_threshold = FC_threshold)
-
-
-if (!is.null(pathways_of_interest)) {
-    pathways_of_interest_analysis2(results = results, pathways_of_interest = pathways_of_interest,  cluster = cell_type, path = path, group1 = group1, group2 = group2, comparison = comparison)
+    ########## Overrepresentation analysis ##########
+    if (run_gProfiler2) {
+        gProfiler2_functional_analysis(results,  cluster = cluster, comparison = comparison, path= path , FC_threshold = FC_threshold)
+        if (!is.null(pathways_of_interest)) {
+            pathways_of_interest_analysis(results = results, pathways_of_interest = pathways_of_interest,  cluster = cluster, path = path, group1 = group1, group2 = group2, comparison = comparison)
+        }
     }
 
-########## Plotting individual genes of interest ##########
+    ########## Plotting individual genes of interest ##########
     if (!is.null(gene_lists_to_plot)) {
         for (gene_list in names(gene_lists_to_plot)) {
-            genes_to_plot <- gene_lists_to_plot[[gene_list]]
-            
+            genes_to_plot <- gene_lists_to_plot[[gene_list]]                    
             print(genes_to_plot)
-            
-        
-        results_scatter <- results_scatter |> mutate(
-                            genes_to_label_first = ifelse(genes %in% genes_to_plot, genes, NA),
-                            diffexpressed = case_when(
-                                log2FoldChange>=FC_threshold & padj < p_value_threshold & !(genes %in% genes_to_plot) ~ 'UP', 
-                                log2FoldChange<=-1*FC_threshold & padj < p_value_threshold & !(genes %in% genes_to_plot)  ~ "DOWN",
-                                genes %in% genes_to_plot & log2FoldChange >= 0 & padj < p_value_threshold ~ 'INTEREST UP',
-                                genes %in% genes_to_plot & log2FoldChange < 0 & padj < p_value_threshold ~ 'INTEREST DOWN',
-                                TRUE ~ 'NO'))  |>
-                        mutate(diffexpressed = factor(diffexpressed, levels = c('NO', 'DOWN', 'UP', 'INTEREST DOWN', 'INTEREST UP'))) |>
-                        arrange(diffexpressed)          
-        
-        my_colors <- c("green4", "darkorchid4", "gray", 'green3', 'darkorchid3')
-        names(my_colors) <- c("DOWN", "UP", "NO", 'INTEREST DOWN', 'INTEREST UP')
+            # Generate scatter and volcano plots
+            results_scatter <- scatterplot(genes_to_plot = genes_to_plot, gene_list_name = gene_list, results, group1, group2, cluster, my_colors, local_figures_path, FC_threshold, p_value_threshold, max_overlaps = 15, label_size, label_threshold, distance_from_diagonal_threshold, test_type = 'Bulk')
+            volcano_plot(genes_to_plot = genes_to_plot, gene_list_name = gene_list, results_scatter, group1, group2, cluster, my_colors, local_figures_path, FC_threshold, p_value_threshold, max_overlaps = 15, label_size, label_threshold, test_type = 'Bulk')
 
-        print(head(results_scatter |> filter(diffexpressed != 'NO') |> arrange(desc(distance_from_diagonal)) |> pull(distance_from_diagonal), n = 11))
-
-        #ggplot(results, aes(x= !!paste0('Avg_', group1), y = !!paste0('Avg_', group2), label = genes_to_label, col = diffexpressed))+
-
-        
-        # Scatterplot
-
-        limx <- results_scatter |> pull(paste0('Avg_', group1)) |> max()
-        limy <- results_scatter |> pull(paste0('Avg_', group2)) |> max()
-        mylims <- max(limx, limy)*6
-        
-        scatter_plot_two <- results_scatter |> 
-            ggplot(aes(x = !!sym(paste0('Avg_', group1)), y = !!sym(paste0('Avg_', group2)), col = diffexpressed))+
-                geom_point(size=1.3
-                ) +
-                geom_abline(slope = 1, intercept = 0)+
-                geom_text_repel(
-                    size=label_size,
-                    box.padding = 0.35,
-                    show.legend = FALSE,
-                    max.overlaps = Inf,
-                    max.time = 10,
-                    max.iter = 10000000,
-                    nudge_x = ifelse(results_scatter$diffexpressed == 'UP' | results_scatter$diffexpressed == 'INTEREST UP', -1, 1),
-                    nudge_y = ifelse(results_scatter$diffexpressed == 'UP' | results_scatter$diffexpressed == 'INTEREST UP', 0.75, -0.75),
-                    aes(label = genes_to_label_first,segment.size=0.5, segment.alpha=1, segment.curvature=0)) +
-            
-            scale_colour_manual(values=my_colors)+
-            theme(text=element_text(size=20), legend.position="none")+
-            labs(title=paste('Pseudobulk DEGs in', str_replace(cell_type,pattern = '_',replace = ' ') ),
-                        x=paste0('Average Normalized Counts in ', group1),
-                        y=paste0('Average Normalized Counts in ',  group2))+
-            theme_classic(base_size = 28, base_line_size=1) +
-            theme(legend.position="none", 
-                title = element_text(size=11),
-                axis.text= element_text(size=10),
-                axis.title= element_text(size=13))+
-        scale_x_log10(limits =  c(0.5, mylims))+
-        scale_y_log10(limits =  c(0.5, mylims))
-
-        ggsave(scatter_plot_two, paste0(figures_path, 'Pseudobulk scatter ',gene_list,' in ', cell_type, ' ', group2, ' vs ', group1, '.pdf'))
-        print(scatter_plot_two)
-
-
-        #Filter values which are not significant but with high  FC that would bias the plot visualization
-        initial_number_of_genes <- nrow(results_scatter)
-        max_FC_up_significant <- results_scatter %>% filter(diffexpressed != 'NO') %>% dplyr::select(log2FoldChange) %>% max(na.rm = T)
-        min_FC_up_significant <- results_scatter %>% filter(diffexpressed != 'NO') %>% dplyr::select(log2FoldChange) %>% min(na.rm = T)
-        if (min_FC_up_significant > -3 | is.na(min_FC_up_significant)) {
-            min_FC_up_significant <- -3
-        }  
-        if (max_FC_up_significant  < 3 | is.na(max_FC_up_significant)) {
-            max_FC_up_significant <- 3    
         }
-        results_volcano <- results_scatter %>% filter(!(diffexpressed == 'NO' & (log2FoldChange < min_FC_up_significant | log2FoldChange > max_FC_up_significant)))
-        final_number_of_genes <- nrow(results_volcano)
-        print(paste('Removed', initial_number_of_genes-final_number_of_genes, 'non-significant genes that would bias the plot visualization'))
+    }   
+    
+    return(c(all_count=DEG_count, UP_count=DEG_UP_count, DOWN_count=DEG_DOWN_count))    
+}
 
-        # # Volcano Plot
-        volcano_plot_two <- results_volcano |> 
-            #arrange(desc(padj)) |>
-            ggplot(aes(x=log2FoldChange, y=log10_pval, label=genes_to_label_first, col=diffexpressed)) +
-            geom_point(size=1.5) +
-            geom_text_repel(
-                size=label_size,
-                box.padding = 0.35,
-                show.legend = FALSE,
-                max.overlaps = max_overlaps,
-                max.time = 10,
-                max.iter = 10000000,
-                nudge_x = ifelse(results_scatter$diffexpressed == 'UP' | results_scatter$diffexpressed == 'INTEREST UP', 3 ,-3),
-                nudge_y = ifelse(results_scatter$diffexpressed == 'UP', 3, 3),
-                #nudge_x = (5),
-                aes(segment.size=0.3, segment.alpha=1, segment.curvature=0)) +
-            scale_colour_manual(values=my_colors)+
-            geom_vline(xintercept= FC_threshold, col="lavenderblush2", linetype=2, size=0.5) +
-            geom_vline(xintercept=-FC_threshold, col="lavenderblush2", linetype=2, size=0.5) +
-            geom_hline(yintercept=-1*log10(p_value_threshold), col="lavenderblush2", linetype=2, size=0.5)+
-            theme(text=element_text(size=20), legend.position="none")+
-            labs(title=paste('Pseudobulk DEGs in', str_replace(cell_type,pattern = '_',replace = ' ') ),
-                        x=paste('Average log2 FC (', group2, '/', group1, ')', sep=''),
-                        y= 'Log10 Adj. p-value')+
-            # coord_cartesian(xlim=c(-1.15, 1.15), ylim = c(0, 95), expand = FALSE)+
-            theme_classic(base_size = 28, base_line_size=1) +
-            theme(legend.position="none", 
-                title = element_text(size=15),
-                axis.text= element_text(size=10),
-                axis.title= element_text(size=13),
-                )         +
-                scale_y_continuous(n.breaks = 8) +
-                scale_x_continuous(n.breaks = 8)
-        ggsave(volcano_plot_two, paste0(figures_path, 'Pseudobulk volcano ',gene_list,' in ', cell_type, ' ', group2, ' vs ', group1, '.pdf'))
-        print(volcano_plot_two)
- 
-    }}
 
-     return(c(all_count=DEG_count, UP_count=DEG_UP_count, DOWN_count=DEG_DOWN_count))
-   
-}                            
+# Cluster Annotation Functions
+annotate_seurat_with_SingleR_Eduard <- function(
+    seurat,
+    local_path,
+    database = c("ImmGen"),
+    annotation_basis = c("cluster_fine", "cell_coarse", "cell_fine"),
+    split_by_groups = TRUE
+) {
+    # Load required libraries
+    require(SingleR)
+    require(Seurat)
+    require(dplyr)
+    require(scCustomize) # for DimPlot_scCustom, if used
+
+    # Select database
+    if (database == "ImmGen") {
+        ref <- ImmGenData(ensembl = FALSE)
+    } else {
+        stop("Currently only 'ImmGen' database is supported.")
+    }
+
+    DefaultAssay(seurat) <- 'RNA'
+
+    # Annotation logic
+    if (annotation_basis == "cluster_fine") {
+        predictions <- SingleR(
+            test = as.SingleCellExperiment(seurat),
+            assay.type.test = 1,
+            ref = ref,
+            labels = ref$label.fine,
+            cluster = seurat$seurat_clusters
+        )
+        row.names <- rownames(predictions)
+        predictions_tbl <- predictions |>
+            as_tibble() |>
+            dplyr::select(labels)
+        predictions_tbl$cluster <- row.names
+        annotations <- seurat@meta.data |>
+            left_join(predictions_tbl, by = join_by('seurat_clusters' == 'cluster')) |>
+            pull(labels)
+        seurat$labels_per_cluster_fine <- annotations
+        Idents(seurat) <- 'labels_per_cluster_fine'
+        p <- DimPlot(seurat, label = FALSE, label.size = 2.5)
+        print(p)
+        ggsave(plot = p, filename = paste0('UMAP_cluster_SingleR_annotations_fine','.pdf'), path = local_path, width = 8, height = 5)
+        if (split_by_groups) {
+            p1 <- DimPlot(seurat, label = TRUE, label.size = 2.5, split.by = 'Groups')
+            ggsave(plot = p1, filename = paste0('UMAP_cluster_SingleR_annotations_fine_by_group','.pdf'), path = local_path, width = 10, height = 5)
+        }
+    } else if (annotation_basis == "cluster_coarse") {
+        predictions <- SingleR(
+            test = as.SingleCellExperiment(seurat),
+            assay.type.test = 1,
+            ref = ref,
+            labels = ref$label.main,
+            cluster = seurat$seurat_clusters
+        )
+        row.names <- rownames(predictions)
+        predictions_tbl <- predictions |>
+            as_tibble() |>
+            dplyr::select(labels)
+        predictions_tbl$cluster <- row.names
+        annotations <- seurat@meta.data |>
+            left_join(predictions_tbl, by = join_by('seurat_clusters' == 'cluster')) |>
+            pull(labels)
+        seurat$labels_per_cluster_coarse <- annotations
+        Idents(seurat) <- 'labels_per_cluster_coarse'
+        p <- DimPlot(seurat, label = FALSE, label.size = 2.5)
+        print(p)
+        ggsave(plot = p, filename = paste0('UMAP_cluster_SingleR_annotations_coarse','.pdf'), path = local_path, width = 8, height = 5)
+        if (split_by_groups) {
+            p1 <- DimPlot(seurat, label = TRUE, label.size = 2.5, split.by = 'Groups')
+            ggsave(plot = p1, filename = paste0('UMAP_cluster_SingleR_annotations_coarse_by_group','.pdf'), path = local_path, width = 10, height = 5)
+        }
+    } else if (annotation_basis == "cell_coarse") {
+        predictions <- SingleR(
+            test = as.SingleCellExperiment(seurat),
+            assay.type.test = 1,
+            ref = ref,
+            labels = ref$label.main
+        )
+        predictions_tbl <- predictions |>
+            as_tibble() |>
+            dplyr::select(labels) |>
+            rename(labels_per_cell_coarse = labels)
+        seurat$labels_per_cell_coarse <- predictions_tbl |> pull(labels_per_cell_coarse)
+        Idents(seurat) <- 'labels_per_cell_coarse'
+        p <- DimPlot_scCustom(seurat, label = FALSE)
+        print(p)
+        ggsave(plot = p, filename = paste0('UMAP_cell_SingleR_annotations_coarse','.pdf'), path = local_path, width = 5, height = 5)
+        if (split_by_groups) {
+            p1 <- DimPlot_scCustom(seurat, label = FALSE, split.by = 'Groups')
+            ggsave(plot = p1, filename = paste0('UMAP_cell_SingleR_annotations_coarse_by_group','.pdf'), path = local_path, width = 6, height = 5)
+        }
+    } else if (annotation_basis == "cell_fine") {
+        predictions <- SingleR(
+            test = as.SingleCellExperiment(seurat),
+            assay.type.test = 1,
+            ref = ref,
+            labels = ref$label.fine
+        )
+        predictions_tbl <- predictions |>
+            as_tibble() |>
+            dplyr::select(labels) |>
+            rename(labels_per_cell_fine = labels)
+        seurat$labels_per_cell_fine <- predictions_tbl |> pull(labels_per_cell_fine)
+        Idents(seurat) <- 'labels_per_cell_fine'
+        p <- DimPlot_scCustom(seurat, label = FALSE)
+        print(p)
+        ggsave(plot = p, filename = paste0('UMAP_cell_SingleR_annotations_fine','.pdf'), path = local_path, width = 26, height = 5)
+        if (split_by_groups) {
+            p1 <- DimPlot_scCustom(seurat, label = FALSE, split.by = 'Groups')
+            ggsave(plot = p1, filename = paste0('UMAP_cell_SingleR_annotations_fine_by_group','.pdf'), path = local_path, width = 30, height = 5)
+        }
+    } else {
+        stop("annotation_basis must be one of 'cluster_fine', 'cluster_coarse', 'cell_coarse', or 'cell_fine'.")
+    }
+
+    DefaultAssay(seurat) <- 'SCT'
+    return(seurat)
+}
+
+# Find and save top marker genes per cluster in a Seurat object
+
+top_genes_per_cluster <- function (seurat, object_annotations = '', tables_path = 'results/tables/', figures_path = 'results/figures/', results_path = 'results/', run_pathway_enrichment = FALSE) {
+    # Function to find top genes per cluster in a Seurat object and save results
+    # Args:
+    #   seurat: Seurat object
+    #   object_annotations: String to append to output file names
+    #   tables_path: Path to save the tables
+    #   figures_path: Path to save the figures
+
+    sequential_palette_dotplot <- hcl.colors(n = 20,'YlGn',rev = T)
+    
+    # Set the identity class for clustering
+    Idents(seurat) <- 'seurat_clusters'
+
+    seurat.markers <- FindAllMarkers(seurat, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+
+    # saveRDS(seurat.markers, file = 'seurat.markers.rds')
+
+
+
+    #Add gene annotations:
+    annotations <- read.csv(here("scripts/annotations.csv"))
+    seurat.markers <- seurat.markers |>
+                    left_join(y= unique(annotations[,c('gene_name', 'description')]),
+                        by = c('gene' = 'gene_name'))
+
+    #Top10 markers
+    seurat.markers %>%
+        group_by(cluster) %>%
+        arrange(desc(avg_log2FC)) |>
+        slice_head(n = 10) -> top10
+
+    #Top25 markers
+    seurat.markers %>%
+        group_by(cluster) %>%
+        arrange(desc(avg_log2FC)) |>
+        slice_head(n = 25) |>
+        ungroup() -> top25
+
+    #Top100 markers
+    seurat.markers %>%
+        group_by(cluster) %>%
+        arrange(desc(avg_log2FC)) |>
+        slice_head(n = 100) -> top100
+
+    #Top3 markers
+    seurat.markers %>%
+        group_by(cluster) %>%
+        arrange(desc(avg_log2FC)) |>
+        slice_head(n = 3) -> top3
+    
+    # Save the top markers to files
+    write.table(top100,file=here(tables_path, paste0('top100', '_',object_annotations, ".tsv")), sep="\t",row.names = FALSE)
+    # write.table(top25,file=here(path,'top25',object_annotations, ".tsv"), sep="\t",row.names = FALSE)
+    write.table(top10,file=here(tables_path, paste0('top10', '_',object_annotations, ".tsv")), sep="\t",row.names = FALSE)
+
+    top100_genes_per_cluster <- top100 %>%
+        group_by(cluster) %>%
+        summarise(genes = str_flatten_comma(gene))
+
+    write.table(top100_genes_per_cluster,
+                file = here(tables_path, paste0('top100_gene_names_per_cluster_', object_annotations, ".tsv")),
+                sep = "\t", row.names = FALSE, quote = FALSE)
+
+    gene_list_plot <- top3 |> pull(gene)
+
+    gene_list_plot <- gene_list_plot |> unique() |> rev()
+    plot1 <- DotPlot_scCustom(seurat,
+                    features = gene_list_plot,
+                    colors_use=sequential_palette_dotplot,
+                    flip_axes = T,
+                    dot.scale = 8,
+                    dot.min = 0,
+                    scale.min = 0,
+                    scale.max = 80,
+                    x_lab_rotate = T,
+                    y_lab_rotate = F) +
+        theme(axis.text.x = element_text(size = 14),
+            axis.text.y = element_text(size = 14),
+            legend.title = element_text(size = 18))
+    
+    if (run_pathway_enrichment) {
+        # Run pathway enrichment analysis
+        gProfiler2_functional_analysis_cluster_identification(seurat, top25, identities = 'seurat_clusters', path=results_path) 
+    }
+
+    return(plot1)
+
+}
+
+extract_cell_counts <- function(seurat, grouping_var, figures_path, tables_path, object_annotations='') {    
+    cell_counts <- FetchData(seurat, vars = c(englue("{{grouping_var}}"), "Samples", "Groups"))
+    cell_counts <- arrange(cell_counts, Samples)
+
+    counts <- cell_counts %>% add_count(Samples, name='total_cell_count_by_sample') 
+
+    counts <- counts %>% 
+        dplyr::count(  {{grouping_var}},  , Samples, total_cell_count_by_sample,name='cluster_count')  |> 
+            mutate(frequency_within_sample=cluster_count*100/total_cell_count_by_sample)  |> 
+            mutate(Samples = as.character(Samples)) |> 
+            arrange(Samples, desc(Samples)) 
+
+    frequency_table <- counts |> 
+        arrange(Samples) |>     
+        pivot_wider(id_cols = {{grouping_var}},  names_from = 'Samples', values_from = frequency_within_sample)
+    write.csv(frequency_table,file=paste0(tables_path, englue("frequency per {{grouping_var}} per condition"), object_annotations, ".csv"), row.names=F)
+
+    count_table <- counts |> 
+        arrange(Samples) |>     
+        pivot_wider(id_cols = {{grouping_var}}, names_from = 'Samples', values_from = cluster_count)
+    write.csv(count_table,file=paste0(tables_path, englue("counts per {{grouping_var}} per condition"), object_annotations, ".csv"),row.names=F)
+
+    # # Barplot of proportion of cells in each cluster by sample
+    # plot1 <- ggplot(seurat@meta.data) +
+    #     geom_bar(aes(x=Groups, fill={{grouping_var}}), position=position_fill()) + theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) 
+    # ggsave(plot = plot1, filename = paste0(figures_path, englue("frequency per {{grouping_var}} per group"), object_annotations, ".pdf"))
+    # print(plot1)
+
+    counts <- cell_counts %>% add_count(Groups, name='total_cell_count_by_sample')
+    counts <- counts %>% 
+        dplyr::count({{grouping_var}}, Groups, total_cell_count_by_sample,name='frequency_within_sample')  |> 
+            mutate(frequency_within_sample=frequency_within_sample*100/total_cell_count_by_sample)  
+
+    # Barplot of proportion of cells in each cluster by sample
+    plot2 <- ggplot(counts, aes(x={{grouping_var}} |> fct_reorder(frequency_within_sample) |> fct_rev(), y = frequency_within_sample,fill=Groups)) +
+        geom_jitter(position = position_jitterdodge(jitter.width = 0.15, dodge.width = 0.8), show.legend = TRUE) +
+        stat_summary(fun = mean, geom = "bar", position = position_dodge(width = 0.9), aes(fill = Groups, alpha = 0.5)) +
+        stat_summary(fun.data = mean_se, fun.args = list(mult = 1),
+            geom = "errorbar", width = 0.2, position = position_dodge(width = 0.9) ) +
+        scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
+        theme_classic() +
+        labs(x = 'Cell type', y = 'Frequency (%)', title = englue('Frequency per {{grouping_var}}'))+
+        guides(alpha = 'none')+
+        theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+    ggsave(plot = plot2, filename =  paste0(figures_path, englue('frequency_per_{{grouping_var}}_per_sample'), object_annotations, '.pdf'), width = 12, height = 6)
+    print(plot2)
+}
+
+
+
+
