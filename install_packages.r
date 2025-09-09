@@ -6,6 +6,7 @@ all_packages <- c(
     'bioc::glmGamPoi',
     'immunogenomics/presto',
     'immunogenomics/harmony',
+    'bioc::scrapper'
 )
 
 renv::install(packages = all_packages)

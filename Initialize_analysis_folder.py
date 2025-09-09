@@ -10,7 +10,8 @@ template_files = [
     'function_template.r',
     'gProfiler2_functions.r',
     'ClusterProfiler_functions.r',
-    'install_packages.r'
+    'install_packages.r',
+    'package_list.r'
 ]
 notebook_files = [
     'Analysis_template.qmd',
@@ -64,7 +65,7 @@ os.rename(
 # Initialize renv in the new directory
 os.chdir(new_dir)
 os.system("R -e 'renv::init()'")
-os.system("Rscript scripts/install_packages.r")
+# os.system("Rscript scripts/install_packages.r")
 print("Files copied and renamed successfully.")
 
 # Initialize git in the new directory
