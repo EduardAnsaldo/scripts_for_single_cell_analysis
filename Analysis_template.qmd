@@ -15,7 +15,9 @@ knitr:
     code-fold: true
     
 processing: true
-gProfiler: false
+
+execute: 
+  keep-md: true
 
 format:
   html:
