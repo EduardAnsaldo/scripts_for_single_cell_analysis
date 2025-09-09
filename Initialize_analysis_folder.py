@@ -69,8 +69,7 @@ print("Files copied and renamed successfully.")
 
 # Initialize git in the new directory
 os.chdir(new_dir)
-# os.system('''R -e 'renv::install("usethis")' ''')
-os.system("R -e 'usethis::use_git()'")
+os.system("git init")
 print("Git repository initialized successfully.")
 
 # Edit .gitignore 
@@ -85,5 +84,6 @@ os.system("git add .")
 os.system("git commit -m 'Initial commit: Added template scripts and notebooks'")
 print("First commit made successfully.")
 
-# Push changes to a new GitHub repository
-os.system("R -e 'usethis::use_github(private=TRUE)'")
+# Push changes to a new GitHub repository 
+os.system("git commit -a -m 'Initial commit: Added template scripts and notebooks'")
+os.system("R -e 'usethis::use_github(private=TRUE)'") 
