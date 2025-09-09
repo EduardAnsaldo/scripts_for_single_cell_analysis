@@ -181,10 +181,9 @@ BiocManager::install(c('BSgenome.Hsapiens.UCSC.hg38', 'EnsDb.Hsapiens.v86'))
 # Doublet finder
 BiocManager::install("scDblFinder")
 a
-
+devtools::install_github('immunogenomics/harmony')
 #renv
 install.packages("renv")
-1
 
 # GIT Credentials
 install.packages("gitcreds")
