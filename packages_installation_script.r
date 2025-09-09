@@ -189,3 +189,16 @@ install.packages("renv")
 install.packages("gitcreds")
 
 install.packages("usethis")
+
+# HomeBrew  installation
+echo >> /Users/eduardansaldo/.zprofile
+echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> /Users/eduardansaldo/.zprofile
+eval "$(/opt/homebrew/bin/brew shellenv)"
+
+# Picrust2 installation
+wget https://github.com/picrust/picrust2/archive/v2.6.2.tar.gz
+tar xvzf  v2.6.2.tar.gz
+cd picrust2-2.6.2/
+mamba env create -f picrust2-env.yaml --platform osx-64 python=3.10
+mamba activate picrust2
+pip install --editable .
