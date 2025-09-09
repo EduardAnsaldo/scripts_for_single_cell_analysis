@@ -35,7 +35,7 @@ gProfiler2_overrepresentation_analysis <- function (significant_genes_FC_ordered
        scale_fill_viridis_c() +
        labs(x = '-log10(p-value)', y = '', title = paste0('UP in ', group, ' - ', cluster)) +
        theme_minimal() +
-       theme(axis.text.y = element_text(size = 12), title = element_text(size = 16), plot.title.position = 'plot˝', legend.position = 'none', axis.text.x = element_text(size = 12))
+       theme(axis.text.y = element_text(size = 12), title = element_text(size = 16), plot.title.position = 'plot', legend.position = 'none', axis.text.x = element_text(size = 12))
      print(plot2)
      ggsave(plot = plot2, filename = paste0(local_path, filename, 'Pathway_enrichment_analysis_gprofiler2', '.pdf'), width = 12, height = 6)
       
