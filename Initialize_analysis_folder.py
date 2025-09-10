@@ -75,7 +75,7 @@ print("Git repository initialized successfully.")
 # Edit .gitignore 
 os.chdir(new_dir)
 with open('.gitignore', 'a') as gitignore:
-    gitignore.write('\nresults/**\ndata/**\n*.html\n*.png\nscripts/*cache/**\nscripts/*files/**\n')
+    gitignore.write('\nresults/**\ndata/**\n*.html\n*.png\nscripts/*cache/**\nscripts/*files/**\n.DS_store\n')
 print(".gitignore updated successfully.")
 
 # Perform first commit

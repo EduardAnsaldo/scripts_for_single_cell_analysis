@@ -30,9 +30,9 @@ gProfiler2_overrepresentation_analysis <- function (significant_genes_FC_ordered
      #                   width = NA, height = NA, filename = paste0(local_path, filename, 'Pathway_enrichment_analysis_gprofiler2', '.pdf'))
       
      plot2 <- term_table |>       
-       ggplot(aes(x = -log10(p_value), y = fct_reorder(term_name, p_value, .desc = T), fill = -log10(p_value))) +
+     ggplot(aes(x = -log10(p_value), y = fct_reorder(term_name, p_value, .desc = T), fill = -log10(p_value))) +
        geom_col(width = 0.7) +
-       scale_fill_viridis_c() +
+       scale_fill_viridis_c(option = 'mako', direction = -1)+
        labs(x = '-log10(p-value)', y = '', title = paste0('UP in ', group, ' - ', cluster)) +
        theme_minimal() +
        theme(axis.text.y = element_text(size = 12), title = element_text(size = 16), plot.title.position = 'plot', legend.position = 'none', axis.text.x = element_text(size = 12))
@@ -43,6 +43,9 @@ gProfiler2_overrepresentation_analysis <- function (significant_genes_FC_ordered
      enrichment_results2 <- enrichment_results[['result']] |> dplyr::select(-c('parents'))
      write.csv(enrichment_results2, paste0(local_path, filename, 'Pathway_enrichment_analysis_gprofiler2', '.csv'))
 
+    }else {
+     p1 <- ggplot()+theme_void()+ geom_text(aes(0,0,label='N/A'))+ xlab(NULL)
+     print(p1)
     }
     
 }
@@ -63,6 +66,9 @@ gProfiler2_functional_analysis <- function (results,  cluster, group2, group1, p
      if (length(significant_genes) > 2) {
           gProfiler2_overrepresentation_analysis(significant_genes, local_path =  local_path ,  group = group2, cluster = cluster, filename = '', p_value_threshold = p_value_threshold)
 
+     }else {
+          p1 <- ggplot()+theme_void()+ geom_text(aes(0,0,label='N/A'))+ xlab(NULL)
+          print(p1)
      }
 
 ######################################## DOWN ########################################
@@ -76,8 +82,10 @@ gProfiler2_functional_analysis <- function (results,  cluster, group2, group1, p
      if (length(significant_genes) > 2) {
           gProfiler2_overrepresentation_analysis(significant_genes, local_path =  local_path , group = group1, cluster = cluster, filename = '', p_value_threshold = p_value_threshold)
      }
-
-     return()
+     else {
+          p1 <- ggplot()+theme_void()+ geom_text(aes(0,0,label='N/A'))+ xlab(NULL)
+          print(p1)
+     }
 }
 
 gProfiler2_functional_analysis_cluster_identification <- function (scRNAseq, results, identities = 'seurat_clusters', path='./') {
