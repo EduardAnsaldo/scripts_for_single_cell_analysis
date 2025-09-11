@@ -90,8 +90,8 @@ gProfiler2_functional_analysis <- function (results,  cluster, group2, group1, p
 
 gProfiler2_functional_analysis_cluster_identification <- function (scRNAseq, results, identities = 'seurat_clusters', path='./') {
 
-    color_scale <- viridis(n = 4, direction = -1)
-    options(enrichplot.colours = color_scale)
+#     color_scale <- viridis(n = 4, direction = -1)
+#     options(enrichplot.colours = color_scale)
      local_path <- paste0(path, 'Cluster_identification_functional_analysis_gProfiler2/')
      unlink(local_path, recursive = T)
      dir.create(local_path)
@@ -101,19 +101,18 @@ gProfiler2_functional_analysis_cluster_identification <- function (scRNAseq, res
 
      #mouse_database <- msigdbr(species = 'Mus musculus',category = 'C8') |> dplyr::select(gs_name, entrez_gene)
 
-for (cluster in levels(scRNAseq@meta.data |> pull(!!identities))) {
-
+for (cluster in levels(scRNAseq@meta.data |> pull(!!as.name(identities)))) {
+     print(cluster)
 
      name <- paste0('Cluster ', cluster, ' - ')
 
      significant_results_cluster <- results |> 
-          filter(cluster == cluster) |>
+          filter(cluster == {{cluster}}) |>
           pull(gene) |>
           unique()
     
-     gProfiler2_overrepresentation_analysis(significant_results_cluster, local_path,  'clusters', filename =  name )
+     gProfiler2_overrepresentation_analysis(significant_genes_FC_ordered = significant_results_cluster, local_path = local_path, group = '', filename =  name,  cluster = cluster, p_value_threshold = 0.05)
  
 
      }
-     return()
 }
