@@ -115,10 +115,10 @@ plot_circos_clonotypes <- function(
             } else {
                 table_one <- clonotype_data_plot |>
                     filter(group == origin & group_counts != 0)  |>
-                    dplyr::select(c('clonotype', 'group', 'coordinates')) 
+                    dplyr::select(all_of(c('clonotype', 'group', 'coordinates')))
                 table_two <- clonotype_data_plot |>
                     filter(group == target & group_counts != 0) |>
-                    dplyr::select(c('clonotype', 'group', 'coordinates'))
+                    dplyr::select(all_of(c('clonotype', 'group', 'coordinates')))
                 link_table  <-  inner_join(table_one, table_two, by = 'clonotype') |> column_to_rownames(var = 'clonotype')
                 for (clonotype1 in rownames(link_table)) {
                     group1 <- link_table[[clonotype1, 'group.x']]
@@ -182,7 +182,7 @@ overlap_circos_and_tables <- function(
     
     clonotype_data <- combined2[[1]] |>
         as_tibble() |>
-        dplyr::select(c('CTaa', 'CTgene', grouping_variable, cell_types_column)) |>
+        dplyr::select(all_of(c('CTaa', 'CTgene', grouping_variable, cell_types_column))) |>
         add_count(CTaa, !!as.name(grouping_variable), sort = TRUE, name = 'counts_per_condition') |>
         group_by(CTaa, !!as.name(grouping_variable)) |>
         summarize(across(everything(), Mode), .groups = 'drop') |>
@@ -227,7 +227,7 @@ overlap_circos_and_tables <- function(
         mutate(group = fct(group, levels = group_levels))
     
     clonotype_data_plot_distinct <- clonotype_data_plot |>
-        dplyr::select(c('group', 'sequence_count_by_grouping_variable')) |>
+        dplyr::select(all_of(c('group', 'sequence_count_by_grouping_variable'))) |>
         distinct() |>
         arrange(group) |>
         mutate(origin = 0) |>
@@ -247,6 +247,7 @@ overlap_circos_and_tables <- function(
         cex = cex,
         samples = samples,
         groups = groups,
+        alpha_col = alpha_col,
         base_colors = base_colors,
         color_palette = color_palette
     )

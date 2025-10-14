@@ -63,11 +63,11 @@ scatterplot <- function (results, group1, group2, cluster, my_colors, local_figu
            scale_y_log10(limits =  c(0.5, mylims))
 
         plot_filename <- if (!is.null(gene_list_name)) {
-            paste0(local_figures_path, test_type, '_scatter_', gene_list_name, '_DEG_in_', cluster, '.pdf')
+            paste0(test_type, '_scatter_', gene_list_name, '_DEG_in_', cluster, '.pdf')
         } else {
-            paste0(local_figures_path, test_type, '_scatter_genes_of_interest_DEG_in_', cluster, '.pdf')
+            paste0(test_type, '_scatter_genes_of_interest_DEG_in_', cluster, '.pdf')
         }
-        ggsave(plot = scatter_plot, filename = plot_filename)
+        ggsave(plot = scatter_plot, filename = plot_filename, path = local_figures_path)
         print(scatter_plot)
         return(results_scatter)
     }
@@ -170,7 +170,7 @@ scatterplot <- function (results, group1, group2, cluster, my_colors, local_figu
        scale_x_log10(limits =  c(0.5, mylims))+
        scale_y_log10(limits =  c(0.5, mylims))
 
-    ggsave(plot = scatter_plot, filename = paste0(local_figures_path, test_type,'_scatter_DEG_in_', cluster, '.pdf'))
+    ggsave(plot = scatter_plot, filename = paste0(test_type,'_scatter_DEG_in_', cluster, '.pdf'), path = local_figures_path)
     print(scatter_plot)
     return(results_scatter)    
 }
@@ -247,11 +247,11 @@ volcano_plot <- function (results_scatter, group1, group2, cluster, my_colors, l
                 scale_y_continuous(n.breaks = 8) +
                 scale_x_continuous(n.breaks = 8)
         plot_filename <- if (!is.null(gene_list_name)) {
-            paste0(local_figures_path, test_type, '_volcano_', gene_list_name, '_DEG_in_', cluster, '.pdf')
+            paste0(test_type, '_volcano_', gene_list_name, '_DEG_in_', cluster, '.pdf')
         } else {
-            paste0(local_figures_path, test_type, '_volcano_genes_of_interest_DEG_in_', cluster, '.pdf')
+            paste0(test_type, '_volcano_genes_of_interest_DEG_in_', cluster, '.pdf')
         }
-        ggsave(plot=volcano_plot_2, filename = plot_filename)
+        ggsave(plot=volcano_plot_2, filename = plot_filename, path = local_figures_path)
         print(volcano_plot_2)
         return(invisible(NULL))
     }
@@ -298,13 +298,16 @@ volcano_plot <- function (results_scatter, group1, group2, cluster, my_colors, l
             )         +
             scale_y_continuous(n.breaks = 8) +
             scale_x_continuous(n.breaks = 8)
-    ggsave(plot = volcano_plot, filename = paste0(local_figures_path, test_type, '_volcano_DEG_in_', cluster, '.pdf'))
+    ggsave(plot = volcano_plot, filename = paste0(test_type, '_volcano_DEG_in_', cluster, '.pdf'), path = local_figures_path)
     print(volcano_plot)
 }
 
 # Pseudobulk function
 
-pseudobulk <- function (scRNAseq, comparison, group1, group2, cluster='all_clusters', path='./', FC_threshold = 0.3, p_value_threshold = 0.05, max_overlaps = 15, label_size = 5, pathways_of_interest = NULL, label_threshold = 100000, distance_from_diagonal_threshold = 0.4, gene_lists_to_plot = NULL, expression_threshold_for_gene_list = 20, colors = c('green4', 'darkorchid4'), minimum_cell_number = 10, run_gProfiler2 = FALSE) {
+pseudobulk <- function (scRNAseq, comparison, group1, group2, cluster='all_clusters', path='./', FC_threshold = 0.3, p_value_threshold = 0.05, max_overlaps = 15, label_size = 5, pathways_of_interest = NULL, label_threshold = 100000, distance_from_diagonal_threshold = 0.4, gene_lists_to_plot = NULL, expression_threshold_for_gene_list = 20, colors = c('green4', 'darkorchid4'), minimum_cell_number = 10, run_pathway_enrichment = T, genes_to_exclude = c()) {
+
+    # Subset seurat object
+    scRNAseq <- subset(scRNAseq, subset = (str_detect(!!as.name(comparison), group1) | str_detect(!!as.name(comparison), group2)))
 
     # Set colors for the plot
     my_colors <- c(colors, "gray")
@@ -343,7 +346,11 @@ pseudobulk <- function (scRNAseq, comparison, group1, group2, cluster='all_clust
                             slot='counts',
                             return.seurat=FALSE)
 
-    counts <- counts$RNA |> as.data.frame()
+    counts <- counts$RNA |> as.data.frame() |>
+                rownames_to_column('genes') |>
+                as_tibble() |>
+                dplyr::select(-any_of(genes_to_exclude)) |>
+                column_to_rownames('genes')
 
     # Run DE Analysis
     #Generate sample level metadata
@@ -377,7 +384,7 @@ pseudobulk <- function (scRNAseq, comparison, group1, group2, cluster='all_clust
     DESeq2::plotPCA(rld, ntop=500, intgroup='condition') #PCA
     ggsave(filename=paste0('Pseudobulk_PCA_', cluster, '.pdf'), path=local_figures_path) 
     PCA_table <- DESeq2::plotPCA(rld, ntop=500, intgroup='condition', returnData = T) #PCA table
-    write.csv(PCA_table, file=paste(path, 'PCA_pseudobulk', cluster, group2, 'vs', group1, '.csv', sep='_'))
+    write.csv(PCA_table, file = here(path, paste('PCA_pseudobulk', cluster, group2, 'vs', group1, '.csv', sep='_')))
 
     #################### Run DESeq2
     dds <- DESeq(dds)
@@ -418,8 +425,8 @@ pseudobulk <- function (scRNAseq, comparison, group1, group2, cluster='all_clust
             ) &(log2FoldChange >= FC_threshold |
                 log2FoldChange <= -1 * FC_threshold)) |> 
         arrange(padj)
-    results_filtered_UP <- filter(results_filtered, log2FoldChange >  FC_threshold) 
-    results_filtered_DOWN <- filter(results_filtered, log2FoldChange <  FC_threshold)
+    results_filtered_UP <- filter(results_filtered, log2FoldChange >=  FC_threshold) 
+    results_filtered_DOWN <- filter(results_filtered, log2FoldChange <=  -1*FC_threshold)
 
     # Write results to CSV files
     write.csv(results |> arrange(padj), file= here(gene_lists_path, paste('ALL_GENES_DEG_Analysis', cluster, 'pseudobulk', group2, 'vs', group1, '.csv', sep='_')))
@@ -436,8 +443,8 @@ pseudobulk <- function (scRNAseq, comparison, group1, group2, cluster='all_clust
     volcano_plot(results_scatter, group1, group2, cluster, my_colors, local_figures_path, FC_threshold, p_value_threshold, max_overlaps = 15, label_size, label_threshold, test_type ='Pseudobulk')
 
     ########## Overrepresentation analysis ##########
-    if (run_gProfiler2) {
-        gProfiler2_functional_analysis(results,  cluster = cluster, , group1 = group1, group2 = group2, path= path , FC_threshold = FC_threshold)
+    if (run_pathway_enrichment) {
+        Metascape_functional_analysis(results,  grouping_var = cluster, group1 = group1, group2 = group2, path= path , FC_threshold = FC_threshold)
         if (!is.null(pathways_of_interest)) {
             pathways_of_interest_analysis(results = results, pathways_of_interest = pathways_of_interest,  cluster = cluster, path = path, group1 = group1, group2 = group2, comparison = comparison)
         }
@@ -456,11 +463,11 @@ pseudobulk <- function (scRNAseq, comparison, group1, group2, cluster='all_clust
     }   
     
     return(c(all_count=DEG_count, UP_count=DEG_UP_count, DOWN_count=DEG_DOWN_count))    
-}                            
+}                                                   
 
 # Wilcox DE analysis
 
-DEG_FindMarkers_RNA_assay <- function (scRNAseq, comparison, group1, group2, cluster='all_clusters', path='./', FC_threshold = 0.3, p_value_threshold = 0.05, max_overlaps = 15, label_size = 5, pathways_of_interest = NULL, label_threshold = 100000, distance_from_diagonal_threshold = 0.7, gene_lists_to_plot = NULL, expression_threshold_for_gene_list = 20, colors = c('green4', 'darkorchid4'), minimum_cell_number = 30, run_gProfiler2 = FALSE) {
+DEG_FindMarkers_RNA_assay <- function (scRNAseq, comparison, group1, group2, cluster='all_clusters', path='./', FC_threshold = 0.3, p_value_threshold = 0.05, max_overlaps = 15, label_size = 5, pathways_of_interest = NULL, label_threshold = 100000, distance_from_diagonal_threshold = 0.7, gene_lists_to_plot = NULL, expression_threshold_for_gene_list = 20, colors = c('green4', 'darkorchid4'), minimum_cell_number = 30, run_pathway_enrichment = TRUE) {
 
     # Set colors for the plot
     my_colors <- c(colors, "gray")
@@ -524,9 +531,9 @@ DEG_FindMarkers_RNA_assay <- function (scRNAseq, comparison, group1, group2, clu
                     left_join(y= unique(annotations[,c('gene_name', 'description')]),
                         by = c('genes' = 'gene_name')) |>
                     left_join(y = counts_CPM, by = c('genes' = 'gene'))
-    results_filtered <- filter(results, padj < p_value_threshold) %>% arrange(padj)
-    results_filtered_UP <- filter(results_filtered, log2FoldChange >  FC_threshold) 
-    results_filtered_DOWN <- filter(results_filtered, log2FoldChange <  FC_threshold)
+    results_filtered <- filter(results, padj < p_value_threshold & (log2FoldChange >= FC_threshold | log2FoldChange <= -1*FC_threshold)) %>% arrange(padj)
+    results_filtered_UP <- filter(results_filtered, log2FoldChange >=  FC_threshold) 
+    results_filtered_DOWN <- filter(results_filtered, log2FoldChange <=  -1*FC_threshold)
 
     # Write results to CSV files
     write.csv(results_filtered |> arrange(padj), file=here(gene_lists_path, paste('ALL_GENES_DEG_Analysis', cluster, 'Wilcox', group2, 'vs', group1, '.csv', sep='_')))
@@ -543,8 +550,8 @@ DEG_FindMarkers_RNA_assay <- function (scRNAseq, comparison, group1, group2, clu
     volcano_plot(results_scatter, group1 = group1, group2 = group2, cluster = cluster, my_colors = my_colors, local_figures_path = local_figures_path, FC_threshold = FC_threshold, p_value_threshold = p_value_threshold, max_overlaps = max_overlaps, label_size = label_size, label_threshold = label_threshold, test_type ='Wilcox')
 
     ########## Overrepresentation analysis ##########
-    if (run_gProfiler2) {
-        gProfiler2_functional_analysis(results,  cluster = cluster, , group1 = group1, group2 = group2, path= path , FC_threshold = FC_threshold)
+    if (run_pathway_enrichment) {
+        Metascape_functional_analysis(results,  grouping_var = cluster, , group1 = group1, group2 = group2, path= path , FC_threshold = FC_threshold)
         if (!is.null(pathways_of_interest)) {
             pathways_of_interest_analysis(results = results, pathways_of_interest = pathways_of_interest,  cluster = cluster, path = path, group1 = group1, group2 = group2, comparison = comparison)
         }
@@ -565,7 +572,7 @@ DEG_FindMarkers_RNA_assay <- function (scRNAseq, comparison, group1, group2, clu
     return(c(all_count=DEG_count, UP_count=DEG_UP_count, DOWN_count=DEG_DOWN_count))
 }
 
-DEG_FindMarkers_SCT_assay <- function (scRNAseq, comparison, group1, group2, is_integrated_subset = FALSE, cluster='all_clusters', path='./', FC_threshold = 0.3, p_value_threshold = 0.05, max_overlaps = 15, label_size = 5, pathways_of_interest = NULL, label_threshold = 100000, distance_from_diagonal_threshold = 0.7, gene_lists_to_plot = NULL, expression_threshold_for_gene_list = 20, colors = c('green4', 'darkorchid4'), minimum_cell_number = 30, run_gProfiler2 = FALSE) {
+DEG_FindMarkers_SCT_assay <- function (scRNAseq, comparison, group1, group2, is_integrated_subset = FALSE, cluster='all_clusters', path='./', FC_threshold = 0.3, p_value_threshold = 0.05, max_overlaps = 15, label_size = 5, pathways_of_interest = NULL, label_threshold = 100000, distance_from_diagonal_threshold = 0.7, gene_lists_to_plot = NULL, expression_threshold_for_gene_list = 20, colors = c('green4', 'darkorchid4'), minimum_cell_number = 30, run_pathway_enrichment = TRUE) {
 
     # Set colors for the plot
     my_colors <- c(colors, "gray")
@@ -629,9 +636,9 @@ DEG_FindMarkers_SCT_assay <- function (scRNAseq, comparison, group1, group2, is_
                     left_join(y= unique(annotations[,c('gene_name', 'description')]),
                         by = c('genes' = 'gene_name')) |>
                     left_join(y = counts_CPM, by = c('genes' = 'gene'))
-    results_filtered <- filter(results, padj < p_value_threshold) %>% arrange(padj)
-    results_filtered_UP <- filter(results_filtered, log2FoldChange > FC_threshold) 
-    results_filtered_DOWN <- filter(results_filtered, log2FoldChange < FC_threshold)
+    results_filtered <- filter(results, padj < p_value_threshold & (log2FoldChange >= FC_threshold | log2FoldChange <= -1*FC_threshold)) %>% arrange(padj)
+    results_filtered_UP <- filter(results_filtered, log2FoldChange >= FC_threshold) 
+    results_filtered_DOWN <- filter(results_filtered, log2FoldChange <= -1*FC_threshold)
 
     # Write results to CSV files
     write.csv(results_filtered |> arrange(padj), file=here(gene_lists_path, paste('ALL_GENES_DEG_Analysis', cluster, 'Wilcox', group2, 'vs', group1, '.csv', sep='_')))
@@ -648,8 +655,8 @@ DEG_FindMarkers_SCT_assay <- function (scRNAseq, comparison, group1, group2, is_
     volcano_plot(results_scatter, group1 = group1, group2 = group2, cluster = cluster, my_colors = my_colors, local_figures_path = local_figures_path, FC_threshold = FC_threshold, p_value_threshold = p_value_threshold, max_overlaps = max_overlaps, label_size = label_size, label_threshold = label_threshold, test_type ='Wilcox')
 
     ########## Overrepresentation analysis ##########
-    if (run_gProfiler2) {
-        gProfiler2_functional_analysis(results,  cluster = cluster, group1 = group1, group2 = group2, path= path , FC_threshold = FC_threshold)
+    if (run_pathway_enrichment) {
+        Metascape_functional_analysis(results,  grouping_var = cluster, group1 = group1, group2 = group2, path= path , FC_threshold = FC_threshold)
         if (!is.null(pathways_of_interest)) {
             pathways_of_interest_analysis(results = results, pathways_of_interest = pathways_of_interest,  cluster = cluster, path = path, group1 = group1, group2 = group2, comparison = comparison)
         }
@@ -673,7 +680,7 @@ DEG_FindMarkers_SCT_assay <- function (scRNAseq, comparison, group1, group2, is_
 
 # Bulk functions
 
-bulk_analysis <- function (counts_table, comparison = 'Groups', group1, group2, cluster='', path='./', FC_threshold = 0.3, p_value_threshold = 0.05, max_overlaps = 15, label_size = 5, pathways_of_interest = NULL, label_threshold = 100000, distance_from_diagonal_threshold = 0.4, gene_lists_to_plot = NULL, expression_threshold_for_gene_list = 20, colors = c('green4', 'darkorchid4'), minimum_cell_number = 10, run_gProfiler2 = FALSE) {
+bulk_analysis <- function (counts_table, comparison = 'Groups', group1, group2, cluster='', path='./', FC_threshold = 0.3, p_value_threshold = 0.05, max_overlaps = 15, label_size = 5, pathways_of_interest = NULL, label_threshold = 100000, distance_from_diagonal_threshold = 0.4, gene_lists_to_plot = NULL, expression_threshold_for_gene_list = 20, colors = c('green4', 'darkorchid4'), minimum_cell_number = 10, run_pathway_enrichment = TRUE) {
 
     # Set colors for the plot
     my_colors <- c(colors, "gray")
@@ -723,7 +730,7 @@ bulk_analysis <- function (counts_table, comparison = 'Groups', group1, group2, 
     DESeq2::plotPCA(rld, ntop=500, intgroup='condition') #PCA
     ggsave(filename=paste0('Bulk_PCA_', cluster, '.pdf'), path=local_figures_path) 
     PCA_table <- DESeq2::plotPCA(rld, ntop=500, intgroup='condition', returnData = T) #PCA table
-    write.csv(PCA_table, file=paste(path, 'PCA_bulk', cluster, group2, 'vs', group1, '.csv', sep='_'))
+    write.csv(PCA_table, file=here(path, paste( 'PCA_bulk', cluster, group2, 'vs', group1, '.csv', sep='_')))
 
     #################### Run DESeq2
     dds <- DESeq(dds)
@@ -764,8 +771,8 @@ bulk_analysis <- function (counts_table, comparison = 'Groups', group1, group2, 
             ) &(log2FoldChange >= FC_threshold |
                 log2FoldChange <= -1 * FC_threshold)) |> 
         arrange(padj)
-    results_filtered_UP <- filter(results_filtered, log2FoldChange >  FC_threshold) 
-    results_filtered_DOWN <- filter(results_filtered, log2FoldChange <  FC_threshold)
+    results_filtered_UP <- filter(results_filtered, log2FoldChange >=   FC_threshold) 
+    results_filtered_DOWN <- filter(results_filtered, log2FoldChange <= -1*FC_threshold)
 
     # Write results to CSV files
     write.csv(results |> arrange(padj), file= here(gene_lists_path, paste('ALL_GENES_DEG_Analysis', cluster, 'bulk', group2, 'vs', group1, '.csv', sep='_')))
@@ -782,8 +789,8 @@ bulk_analysis <- function (counts_table, comparison = 'Groups', group1, group2, 
     volcano_plot(results_scatter, group1, group2, cluster, my_colors, local_figures_path, FC_threshold, p_value_threshold, max_overlaps = 15, label_size, label_threshold, test_type ='Bulk')
 
     ########## Overrepresentation analysis ##########
-    if (run_gProfiler2) {
-        gProfiler2_functional_analysis(results,  cluster = cluster, , group1 = group1, group2 = group2, path= path , FC_threshold = FC_threshold)
+    if (run_pathway_enrichment) {
+        Metascape_functional_analysis(results,  grouping_var = cluster, , group1 = group1, group2 = group2, path= path , FC_threshold = FC_threshold)
         if (!is.null(pathways_of_interest)) {
             pathways_of_interest_analysis(results = results, pathways_of_interest = pathways_of_interest,  cluster = cluster, path = path, group1 = group1, group2 = group2, comparison = comparison)
         }
@@ -929,7 +936,7 @@ annotate_seurat_with_SingleR_Eduard <- function(
 
 # Find and save top marker genes per cluster in a Seurat object
 
-top_genes_per_cluster <- function (seurat, object_annotations = '', tables_path = 'results/tables/', figures_path = 'results/figures/', results_path = 'results/', run_pathway_enrichment = FALSE) {
+top_genes_per_cluster <- function (seurat, n_genes_to_plot = 3, object_annotations = '', tables_path = 'results/tables/', figures_path = 'results/figures/', results_path = 'results/', run_pathway_enrichment = FALSE) {
     # Function to find top genes per cluster in a Seurat object and save results
     # Args:
     #   seurat: Seurat object
@@ -964,8 +971,7 @@ top_genes_per_cluster <- function (seurat, object_annotations = '', tables_path 
     seurat.markers %>%
         group_by(cluster) %>%
         arrange(desc(avg_log2FC)) |>
-        slice_head(n = 25) |>
-        ungroup() -> top25
+        slice_head(n = 25) -> top25
 
     #Top100 markers
     seurat.markers %>%
@@ -973,11 +979,11 @@ top_genes_per_cluster <- function (seurat, object_annotations = '', tables_path 
         arrange(desc(avg_log2FC)) |>
         slice_head(n = 100) -> top100
 
-    #Top3 markers
+    #Topn markers
     seurat.markers %>%
         group_by(cluster) %>%
         arrange(desc(avg_log2FC)) |>
-        slice_head(n = 3) -> top3
+        slice_head(n = n_genes_to_plot) -> topn
     
     # Save the top markers to files
     write.table(top100,file=here(tables_path, paste0('top100', '_',object_annotations, ".tsv")), sep="\t",row.names = FALSE)
@@ -992,7 +998,7 @@ top_genes_per_cluster <- function (seurat, object_annotations = '', tables_path 
                 file = here(tables_path, paste0('top100_gene_names_per_cluster_', object_annotations, ".tsv")),
                 sep = "\t", row.names = FALSE, quote = FALSE)
 
-    gene_list_plot <- top3 |> pull(gene)
+    gene_list_plot <- topn |> pull(gene)
 
     gene_list_plot <- gene_list_plot |> unique() |> rev()
     plot1 <- DotPlot_scCustom(seurat,
@@ -1011,10 +1017,10 @@ top_genes_per_cluster <- function (seurat, object_annotations = '', tables_path 
     
     if (run_pathway_enrichment) {
         # Run pathway enrichment analysis
-        gProfiler2_functional_analysis_cluster_identification(seurat, top25, identities = 'seurat_clusters', path=results_path, object_annotations = object_annotations) 
+        Metascape_functional_analysis_cluster_identification(seurat, top25, identities = 'seurat_clusters', path=results_path, object_annotations = object_annotations) 
     }
 
-    return(plot1)
+    return(list(plot = plot1))
 
 }
 
@@ -1025,7 +1031,7 @@ extract_cell_counts <- function(seurat, grouping_var, figures_path, tables_path,
     counts <- cell_counts %>% add_count(Samples, name='total_cell_count_by_sample') 
 
     counts <- counts %>% 
-        dplyr::count(  {{grouping_var}},  , Samples, total_cell_count_by_sample,name='cluster_count')  |> 
+        dplyr::count(  {{grouping_var}},  , Samples, Groups,  total_cell_count_by_sample,name='cluster_count')  |> 
             mutate(frequency_within_sample=cluster_count*100/total_cell_count_by_sample)  |> 
             mutate(Samples = as.character(Samples)) |> 
             arrange(Samples, desc(Samples)) 
@@ -1033,12 +1039,12 @@ extract_cell_counts <- function(seurat, grouping_var, figures_path, tables_path,
     frequency_table <- counts |> 
         arrange(Samples) |>     
         pivot_wider(id_cols = {{grouping_var}},  names_from = 'Samples', values_from = frequency_within_sample)
-    write.csv(frequency_table,file=paste0(tables_path, englue("frequency per {{grouping_var}} per condition "), object_annotations, ".csv"), row.names=F)
+    write.csv(frequency_table,file=here(tables_path, paste0(englue("frequency per {{grouping_var}} per condition "), object_annotations, ".csv")), row.names=F)
 
     count_table <- counts |> 
         arrange(Samples) |>     
         pivot_wider(id_cols = {{grouping_var}}, names_from = 'Samples', values_from = cluster_count)
-    write.csv(count_table,file=paste0(tables_path, englue("counts per {{grouping_var}} per condition "), object_annotations, ".csv"),row.names=F)
+    write.csv(count_table,file = here(tables_path, paste0(englue("counts per {{grouping_var}} per condition "), object_annotations, ".csv")),row.names=F)
 
     # # Barplot of proportion of cells in each cluster by sample
     # plot1 <- ggplot(seurat@meta.data) +
@@ -1046,13 +1052,13 @@ extract_cell_counts <- function(seurat, grouping_var, figures_path, tables_path,
     # ggsave(plot = plot1, filename = paste0(figures_path, englue("frequency per {{grouping_var}} per group"), object_annotations, ".pdf"))
     # print(plot1)
 
-    counts <- cell_counts %>% add_count(Groups, name='total_cell_count_by_sample')
-    counts <- counts %>% 
-        dplyr::count({{grouping_var}}, Groups, total_cell_count_by_sample,name='frequency_within_sample')  |> 
-            mutate(frequency_within_sample=frequency_within_sample*100/total_cell_count_by_sample)  
+    # counts <- cell_counts %>% add_count(Groups, name='total_cell_count_by_sample')
+    # counts <- counts %>% 
+    #     dplyr::count({{grouping_var}}, Groups, total_cell_count_by_sample,name='frequency_within_sample')  |> 
+    #         mutate(frequency_within_sample=frequency_within_sample*100/total_cell_count_by_sample)  
 
     # Barplot of proportion of cells in each cluster by sample
-    plot2 <- ggplot(counts, aes(x={{grouping_var}} |> fct_reorder(frequency_within_sample) |> fct_rev(), y = frequency_within_sample,fill=Groups)) +
+    plot2 <- ggplot(counts, aes(x={{grouping_var}} |> fct_reorder(frequency_within_sample) |> fct_rev(), y = frequency_within_sample, fill=Groups)) +
         geom_jitter(position = position_jitterdodge(jitter.width = 0.15, dodge.width = 0.8), show.legend = TRUE) +
         stat_summary(fun = mean, geom = "bar", position = position_dodge(width = 0.9), aes(fill = Groups, alpha = 0.5)) +
         stat_summary(fun.data = mean_se, fun.args = list(mult = 1),
@@ -1062,10 +1068,104 @@ extract_cell_counts <- function(seurat, grouping_var, figures_path, tables_path,
         labs(x = 'Cell type', y = 'Frequency (%)', title = englue('Frequency per {{grouping_var}}'))+
         guides(alpha = 'none')+
         theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
-    ggsave(plot = plot2, filename =  paste0(figures_path, englue('frequency_per_{{grouping_var}}_per_sample '), object_annotations, '.pdf'), width = 12, height = 6)
+    ggsave(plot = plot2, filename =  paste0(englue('frequency_per_{{grouping_var}}_per_sample '), object_annotations, '.pdf'), width = 12, height = 6, path = figures_path)
     print(plot2)
 }
+calculate_D50 <- function (seurat, cell_grouping_var, replicate_var, replicate_group_var = NULL, results_path, figures_path) {
+
+    #Extracting TCR data for clusters of interest
+    Idents(seurat) <- englue("{{cell_grouping_var}}")
+    combined2 <- scRepertoire:::.expression2List(seurat, split.by ='ident')
+    combined3 <- scRepertoire:::.expression2List(seurat, split.by ='orig.ident')
+    grouping_var_levels <- levels(seurat@meta.data |> pull({{cell_grouping_var}}))
+    replicate_var_levels <- levels(seurat@meta.data |> pull({{replicate_var}}))
+
+    #Initiating results data frame
+    results <- as.data.frame(matrix(nrow = 0,ncol = length(grouping_var_levels)))
+    # colnames(results)
+    rnames <- c()
+
+    #Calculate D50
+    for (HTO in replicate_var_levels) {
+        
+        result <- c()
+
+        cell_type_HTO_data <- combined3[[1]]|>
+                                        filter({{replicate_var}} == HTO) |>
+                                        add_count(CTaa, sort=TRUE)
+            #Calculating D50
+            if (nrow(cell_type_HTO_data) < 20) {
+                D50 <- NA 
+            } else {
+                L50 <- floor(nrow(cell_type_HTO_data)/2)
+                number_unique_50 <- cell_type_HTO_data[1:L50,] %>% summarise(n_distinct(CTaa)) %>% as.numeric()
+                number_unique_total <- cell_type_HTO_data[] %>% summarise(n_distinct(CTaa)) %>% as.numeric()
+                D50 <- number_unique_50/number_unique_total
+            }
+            result <- c(result, D50)
 
 
+        for (cell_type in grouping_var_levels) {
+            #Extracting data for cell type and HTO
+            cell_type_HTO_data <- combined2[[cell_type]]|>
+                                        filter({{replicate_var}} == HTO) |>
+                                        add_count(CTaa, sort=TRUE)
+
+            #Calculating D50
+            if (nrow(cell_type_HTO_data) < 20) {
+                D50 <- NA 
+            } else {
+                L50 <- floor(nrow(cell_type_HTO_data)/2)
+                number_unique_50 <- cell_type_HTO_data[1:L50,] %>% summarise(n_distinct(CTaa)) %>% as.numeric()
+                number_unique_total <- cell_type_HTO_data[] %>% summarise(n_distinct(CTaa)) %>% as.numeric()
+                D50 <- number_unique_50/number_unique_total
+            }
+            result <- c(result, D50)
+        }
+        results <- rbind(results, result)
+        rnames <- c(rnames, HTO)
+        # print(HTO)
+
+    }
+    colnames(results) <- paste0(c('All', grouping_var_levels), '_D50')
+    results <- results %>% mutate({{replicate_var}} := rnames) |> arrange({{replicate_var}}) |> relocate({{replicate_var}})
+
+    write.csv(results, file = englue("{results_path}/D50_per_{{cell_grouping_var}}.csv"), row.names=FALSE)
+    print(head(results))
+
+    # Convert results to long format for plotting
+    results_long <- results %>%
+        pivot_longer(-{{replicate_var}}, names_to = englue("{{cell_grouping_var}}"), values_to = "D50") |>
+        mutate({{cell_grouping_var}} := fct_inorder({{cell_grouping_var}}))
 
 
+    
+# Add replicate grouping variable information
+    if (!(englue('replicate_var') == englue('{{replicate_group_var}}'))) {
+        replicate_grouping_var_info <- seurat@meta.data |> 
+            dplyr::select({{replicate_var}}, {{replicate_group_var}})       
+        replicate_grouping_var_info <- replicate_grouping_var_info[!duplicated(replicate_grouping_var_info), ]
+        results_long <- results_long |> 
+            left_join(replicate_grouping_var_info, by = join_by({{replicate_var}} == {{replicate_var}}))
+    }
+
+
+    # Remove NA values for plotting
+    results_long <- results_long %>% filter(!is.na(D50))
+
+    # Plot: x axis is {{replicate_var}}, show only dots (no columns)
+    plot1 <- ggplot(results_long, aes(x = {{cell_grouping_var}}, y = D50, color = {{replicate_group_var}})) +
+        geom_jitter(position = position_jitterdodge(jitter.width = 0.15, dodge.width = 0.8), show.legend = TRUE) +
+        stat_summary(fun = mean, geom = "bar", position = position_dodge(width = 0.9), aes(fill = {{replicate_group_var}}, alpha = 0.5)) +
+        stat_summary(fun.data = mean_se, fun.args = list(mult = 1),
+            geom = "errorbar", width = 0.2, position = position_dodge(width = 0.9) ) +
+        scale_y_continuous(limits = c(0, 0.5), expand = expansion(mult = c(0, 0.05))) +
+        theme_classic() +
+        labs(x = englue("{{replicate_var}}"), y = "D50 Diversity", title = englue("D50 per Group by {{cell_grouping_var}}")) +
+        guides(alpha = 'none')+
+        theme(axis.text.x = element_text(angle = 45, hjust = 1),
+            text = element_text(size = 14),
+            axis.line = element_line(colour = "black")) 
+    ggsave(plot = plot1, filename = paste0(englue('D50_per_{{cell_grouping_var}}.pdf')), width = length(levels(results_long |> pull({{cell_grouping_var}})))+2, height = 6, path = figures_path)
+    print(plot1)
+}
